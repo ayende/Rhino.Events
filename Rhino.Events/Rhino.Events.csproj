@@ -42,6 +42,7 @@
   <ItemGroup>
     <Compile Include="Data\Event.cs" />
     <Compile Include="Data\EventState.cs" />
+    <Compile Include="Data\StreamInformation.cs" />
     <Compile Include="Impl\ExceptionAggregator.cs" />
     <Compile Include="Scribe.cs" />
     <Compile Include="Server\HttpServer.cs" />

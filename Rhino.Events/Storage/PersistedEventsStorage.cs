@@ -30,7 +30,7 @@ namespace Rhino.Events.Storage
 		private readonly ConcurrentQueue<WriteState> writer = new ConcurrentQueue<WriteState>();
 		private readonly CancellationTokenSource cts = new CancellationTokenSource();
 		private readonly JsonDataCache<PersistedEvent> cache = new JsonDataCache<PersistedEvent>();
-		private readonly ConcurrentDictionary<string, long> idToPos = new ConcurrentDictionary<string, long>(StringComparer.InvariantCultureIgnoreCase);
+		private readonly ConcurrentDictionary<string, StreamInformation> idToPos = new ConcurrentDictionary<string, StreamInformation>(StringComparer.InvariantCultureIgnoreCase);
 		private readonly BinaryWriter binaryWriter;
 
 		private long eventsCount;
@@ -94,10 +94,10 @@ namespace Rhino.Events.Storage
 					{
 						return;
 					}
-					catch(Exception e)
+					catch (Exception e)
 					{
-						log.WarnException("Error during initial events read, file corrupted",e);
-						if(options.AllowRecovery == false)
+						log.WarnException("Error during initial events read, file corrupted", e);
+						if (options.AllowRecovery == false)
 							throw;
 						file.SetLength(itemPos);
 						log.Warn("Recovered from corrupted file by truncating file to last known good position: " + itemPos);
@@ -107,10 +107,22 @@ namespace Rhino.Events.Storage
 					{
 						case EventState.Event:
 						case EventState.Snapshot:
-							idToPos[persistedEvent.Id] = itemPos;
+							idToPos.AddOrUpdate(persistedEvent.Id, s => new StreamInformation
+								{
+									LastPosition = itemPos,
+									StreamLength = 1
+								}, (s, information) => new StreamInformation
+									{
+										LastPosition = itemPos,
+										StreamLength = information.StreamLength + 1
+									});
 							break;
 						case EventState.Delete:
-							idToPos[persistedEvent.Id] = Deleted;
+							idToPos[persistedEvent.Id] = new StreamInformation
+								{
+									LastPosition = Deleted,
+									StreamLength = 0
+								};
 							break;
 						default:
 							throw new ArgumentOutOfRangeException(persistedEvent.State.ToString());
@@ -125,11 +137,11 @@ namespace Rhino.Events.Storage
 		{
 			AssertValidState();
 
-			long previous;
+			StreamInformation previous;
 			if (idToPos.TryGetValue(id, out previous) == false)
 				return null;
 
-			return ReadInternal(previous).Select(x => new EventData
+			return ReadInternal(previous.LastPosition).Select(x => new EventData
 				{
 					Data = x.Data,
 					State = x.State,
@@ -179,10 +191,22 @@ namespace Rhino.Events.Storage
 			}
 		}
 
+		private void WriteItem(WriteState item, long prevPos, StreamInformation info)
+		{
+			binaryWriter.Write(item.Id);
+			binaryWriter.Write(prevPos);
+			binaryWriter.Write(info == null ? 1 : info.StreamLength);
+			binaryWriter.Write((int)item.State);
+
+			item.Metadata.WriteTo(new BsonWriter(binaryWriter));
+			item.Data.WriteTo(new BsonWriter(binaryWriter));
+		}
+
 		private static PersistedEvent ReadPersistedEvent(BinaryReader reader)
 		{
 			var id = reader.ReadString();
 			long previous = reader.ReadInt64();
+			var len = reader.ReadInt32();
 			var state = (EventState)reader.ReadInt32();
 			var metadata = (JObject)JToken.ReadFrom(new BsonReader(reader));
 			var data = (JObject)JToken.ReadFrom(new BsonReader(reader));
@@ -193,6 +217,7 @@ namespace Rhino.Events.Storage
 					Metadata = metadata,
 					Previous = previous,
 					State = state,
+					StreamLength = len
 				};
 		}
 
@@ -252,18 +277,12 @@ namespace Rhino.Events.Storage
 					continue;
 				}
 
-				long prevPos;
-				if (idToPos.TryGetValue(item.Id, out prevPos) == false)
-					prevPos = DoesNotExists;
+				StreamInformation info;
+				idToPos.TryGetValue(item.Id, out info);
 
+				var prevPos = info == null ? DoesNotExists : info.LastPosition;
 				var currentPos = file.Position;
-				binaryWriter.Write(item.Id);
-				binaryWriter.Write(prevPos);
-
-				binaryWriter.Write((int)item.State);
-
-				item.Metadata.WriteTo(new BsonWriter(binaryWriter));
-				item.Data.WriteTo(new BsonWriter(binaryWriter));
+				WriteItem(item, prevPos, info);
 
 				cache.Set(currentPos, new PersistedEvent
 					{
@@ -274,32 +293,60 @@ namespace Rhino.Events.Storage
 						Metadata = item.Metadata
 					});
 
-				tasksToNotify.Add(exception =>
-					{
-						if (exception == null)
-						{
-							switch (item.State)
-							{
-								case EventState.Event:
-								case EventState.Snapshot:
-									idToPos.AddOrUpdate(item.Id, currentPos, (s, l) => currentPos);
-									break;
-								case EventState.Delete:
-									idToPos.AddOrUpdate(item.Id, Deleted, (s, l) => Deleted);
-									break;
-								default:
-									throw new ArgumentOutOfRangeException(item.State.ToString());
-							}
-							item.TaskCompletionSource.SetResult(null);
-						}
-						else
-						{
-							item.TaskCompletionSource.SetException(exception);
-						}
-					});
+				var action = CreateCompletionAction(tasksToNotify, item, currentPos);
+				tasksToNotify.Add(action);
 
 				hadWrites = true;
 			}
+		}
+
+		
+		private Action<Exception> CreateCompletionAction(List<Action<Exception>> tasksToNotify, WriteState item, long currentPos)
+		{
+			return exception =>
+				{
+					if (exception == null)
+					{
+						HandleFlushSuccessful(item, currentPos);
+					}
+					else
+					{
+						item.TaskCompletionSource.SetException(exception);
+					}
+				};
+		}
+
+		private void HandleFlushSuccessful(WriteState item, long currentPos)
+		{
+			switch (item.State)
+			{
+				case EventState.Event:
+				case EventState.Snapshot:
+					idToPos.AddOrUpdate(item.Id, s => new StreamInformation
+						{
+							LastPosition = currentPos,
+							StreamLength = 1
+						}, (s, l) => new StreamInformation
+							{
+								LastPosition = currentPos,
+								StreamLength = l.StreamLength + 1
+							});
+					break;
+				case EventState.Delete:
+					idToPos.AddOrUpdate(item.Id, s => new StreamInformation
+						{
+							LastPosition = Deleted,
+							StreamLength = 0
+						}, (s, l) => new StreamInformation
+							{
+								LastPosition = Deleted,
+								StreamLength = 0
+							});
+					break;
+				default:
+					throw new ArgumentOutOfRangeException(item.State.ToString());
+			}
+			item.TaskCompletionSource.SetResult(null);
 		}
 
 		public TimeSpan MaxDurationForFlush { get; set; }

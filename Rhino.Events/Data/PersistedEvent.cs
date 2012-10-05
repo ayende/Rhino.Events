@@ -8,6 +8,7 @@ namespace Rhino.Events.Data
 		public EventState State;
 		public JObject Metadata;
 		public long Previous;
+		public int StreamLength;
 
 		public string Id;
 	}
