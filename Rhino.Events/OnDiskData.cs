@@ -19,7 +19,7 @@ namespace Rhino.Events
 		private readonly ManualResetEventSlim hasItems = new ManualResetEventSlim(false);
 		private readonly ConcurrentQueue<WriteState> writer = new ConcurrentQueue<WriteState>();
 		private readonly CancellationTokenSource cts = new CancellationTokenSource();
-		private readonly JsonDataCache cache = new JsonDataCache();
+		private readonly JsonDataCache<Tuple<JObject, long>> cache = new JsonDataCache<Tuple<JObject, long>>();
 		private readonly ConcurrentDictionary<string, long> idToPos = new ConcurrentDictionary<string, long>(StringComparer.InvariantCultureIgnoreCase);
 	    private readonly BinaryWriter binaryWriter;
 		private DateTime lastWrite;
@@ -81,7 +81,7 @@ namespace Rhino.Events
 					reader.ReadString(); // skip the id
 					previous = reader.ReadInt64();
 					var item = (JObject) JToken.ReadFrom(new BsonReader(reader));
-					cache.Set(itemPos, item, previous);
+					cache.Set(itemPos, Tuple.Create(item, previous));
 					yield return item;
 				}
 			}
@@ -154,7 +154,7 @@ namespace Rhino.Events
 				
 				item.Data.WriteTo(new BsonWriter(binaryWriter));
 
-				cache.Set(currentPos, item.Data, prevPos);
+				cache.Set(currentPos, Tuple.Create(item.Data, prevPos));
 
 				tasksToNotify.Add(() =>
 					{
