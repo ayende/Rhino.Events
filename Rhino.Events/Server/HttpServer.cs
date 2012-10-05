@@ -61,7 +61,10 @@ namespace Rhino.Events.Server
 						EventState state;
 						Enum.TryParse(stateStr, out state);
 
-						await data.EnqueueAsync(id, state, value);
+						var metadata = value.Value<JObject>("@metadata");
+						value.Remove("@metadata");
+
+						await data.EnqueueAsync(id, state, value, metadata);
 
 						break;
 					case "GET":

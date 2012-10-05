@@ -41,6 +41,8 @@ namespace Rhino.Events.Storage
 			public string Id;
 			public JObject Data;
 			public EventState State;
+
+			public JObject Metadata;
 		}
 
 		public PersistedEventsStorage(IStreamSource streamSource, string dirPath)
@@ -76,7 +78,8 @@ namespace Rhino.Events.Storage
 			return ReadInternal(previous).Select(x=>new EventData
 				{
 					Data = x.Data,
-					State = x.State
+					State = x.State,
+					Metadata = x.Metadata
 				});
 		}
 
@@ -117,10 +120,12 @@ namespace Rhino.Events.Storage
 					reader.ReadString(); // skip the id
 					previous = reader.ReadInt64();
 					var state = (EventState) reader.ReadInt32();
+					var metadata = (JObject)JToken.ReadFrom(new BsonReader(reader));
 					var data = (JObject)JToken.ReadFrom(new BsonReader(reader));
 					var persistedEvent = new PersistedEvent
 						{
 							Data = data, 
+							Metadata =  metadata,
 							Previous = previous,
 							State = state
 						};
@@ -196,15 +201,15 @@ namespace Rhino.Events.Storage
 
 				binaryWriter.Write((int)item.State);
 
-				var jObject = item.Data ?? new JObject();// to handle null for deletes
-
-				jObject.WriteTo(new BsonWriter(binaryWriter));
+				item.Metadata.WriteTo(new BsonWriter(binaryWriter));
+				item.Data.WriteTo(new BsonWriter(binaryWriter));
 
 				cache.Set(currentPos, new PersistedEvent
 					{
 						Data = item.Data,
 						State = item.State,
-						Previous = prevPos
+						Previous = prevPos,
+						Metadata = item.Metadata
 					});
 
 				tasksToNotify.Add(exception =>
@@ -264,7 +269,7 @@ namespace Rhino.Events.Storage
 			}
 		}
 
-		public Task EnqueueAsync(string id, EventState state, JObject data)
+		public Task EnqueueAsync(string id, EventState state, JObject data, JObject metadata)
 		{
 			AssertValidState();
 
@@ -272,6 +277,7 @@ namespace Rhino.Events.Storage
 				{
 					Data = data,
 					State = state,
+					Metadata =metadata,
 					Id = id
 				};
 

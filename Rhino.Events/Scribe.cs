@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -13,6 +14,8 @@ namespace Rhino.Events
 		readonly PersistedEventsStorage eventsStorage;
 
 		public JsonSerializer Serializer { get; set; }
+
+		public Func<string, Type> FindClrType { get; set; }
 
 		public Scribe()
 			: this(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ScribedEvents"))
@@ -29,22 +32,46 @@ namespace Rhino.Events
 		public Scribe(IStreamSource source, string dir)
 		{
 			Serializer = new JsonSerializer();
+			FindClrType = s => Type.GetType(s, throwOnError: true);
 			eventsStorage = new PersistedEventsStorage(source, dir);
+		}
+
+		public IEnumerable<object> ReadRaw(string streamId)
+		{
+			var eventDatas = eventsStorage.Read(streamId);
+			if(eventDatas == null)
+				yield break;
+
+			foreach (var data in eventDatas)
+			{
+				var typeString = data.Metadata.Value<string>("Clr-Type");
+				var clrType = FindClrType(typeString);
+				yield return Serializer.Deserialize(new JTokenReader(data.Data), clrType);
+			}
 		}
 
 		public Task EnqueueEventAsync(string streamId, object @event)
 		{
-			return eventsStorage.EnqueueAsync(streamId, EventState.Event, GetSerialized(@event));
+			return eventsStorage.EnqueueAsync(streamId, EventState.Event, GetSerialized(@event), GetMetadata(@event));
+		}
+
+		private JObject GetMetadata(object @event)
+		{
+			var assemblyQualifiedName = @event.GetType().AssemblyQualifiedName;
+			return new JObject
+				{
+					{"Clr-Type", assemblyQualifiedName}
+				};
 		}
 
 		public Task EnqueueSnapshotAsync(string streamId, object @event)
 		{
-			return eventsStorage.EnqueueAsync(streamId, EventState.Snapshot, GetSerialized(@event));
+			return eventsStorage.EnqueueAsync(streamId, EventState.Snapshot, GetSerialized(@event), GetMetadata(@event));
 		}
 
 		public Task EnqueueDeleteAsync(string streamId)
 		{
-			return eventsStorage.EnqueueAsync(streamId, EventState.Delete, null);
+			return eventsStorage.EnqueueAsync(streamId, EventState.Delete, new JObject(),  new JObject());
 		}
 
 		private JObject GetSerialized(object obj)

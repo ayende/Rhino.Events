@@ -6,7 +6,7 @@
 		public string Name { get; set; }
 	}
 
-	public class UseNameChanged
+	public class UserNameChanged
 	{
 		public string UserId { get; set; }
 		public string NewName { get; set; }

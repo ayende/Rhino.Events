@@ -6,6 +6,7 @@ namespace Rhino.Events.Data
 	{
 		public JObject Data;
 		public EventState State;
+		public JObject Metadata;
 		public long Previous;
 	}
 }
