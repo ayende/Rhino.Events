@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Newtonsoft.Json.Bson;
 using Newtonsoft.Json.Linq;
 using System.Linq;
+using Raven.Abstractions.Logging;
 using Rhino.Events.Data;
 using Rhino.Events.Impl;
 
@@ -16,6 +17,8 @@ namespace Rhino.Events.Storage
 {
 	public class PersistedEventsStorage : IDisposable
 	{
+		private static ILog log = LogManager.GetCurrentClassLogger();
+
 		private readonly PersistedOptions options;
 		private const long DoesNotExists = -1;
 		private const long Deleted = -2;
@@ -91,10 +94,11 @@ namespace Rhino.Events.Storage
 					}
 					catch(Exception e)
 					{
-						Trace.WriteLine("Error during initial events read: " + e);
+						log.WarnException("Error during initial events read, file corrupted",e);
 						if(options.AllowRecovery == false)
 							throw;
 						file.SetLength(itemPos);
+						log.Warn("Recovered from corrupted file by truncating file to last known good position: " + itemPos);
 						return;
 					}
 					switch (persistedEvent.State)
