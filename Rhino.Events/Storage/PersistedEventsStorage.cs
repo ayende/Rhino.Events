@@ -16,6 +16,7 @@ namespace Rhino.Events.Storage
 	public class PersistedEventsStorage : IDisposable
 	{
 		private const long DoesNotExists = -1;
+		private const long Deleted = -2;
 
 		private readonly IStreamSource streamSource;
 		private readonly string path;
@@ -39,7 +40,7 @@ namespace Rhino.Events.Storage
 			public readonly TaskCompletionSource<object> TaskCompletionSource = new TaskCompletionSource<object>();
 			public string Id;
 			public JObject Data;
-			public JObject Metadata;
+			public EventState State;
 		}
 
 		public PersistedEventsStorage(IStreamSource streamSource, string dirPath)
@@ -64,7 +65,7 @@ namespace Rhino.Events.Storage
 				});
 		}
 
-		public IEnumerable<Event> Read(string id)
+		public IEnumerable<EventData> Read(string id)
 		{
 			AssertValidState();
 
@@ -72,10 +73,10 @@ namespace Rhino.Events.Storage
 			if (idToPos.TryGetValue(id, out previous) == false)
 				return null;
 
-			return ReadInternal(previous).Select(x=>new Event
+			return ReadInternal(previous).Select(x=>new EventData
 				{
 					Data = x.Data,
-					Metadata = x.Metadata
+					State = x.State
 				});
 		}
 
@@ -108,18 +109,20 @@ namespace Rhino.Events.Storage
 						yield return p;
 					}
 
-					if (previous == DoesNotExists)
+					if (previous == DoesNotExists || previous == Deleted)
 						yield break;
 
 					var itemPos = previous;
 					stream.Position = previous;
 					reader.ReadString(); // skip the id
 					previous = reader.ReadInt64();
-					var metadata = (JObject)JToken.ReadFrom(new BsonReader(reader));
+					var state = (EventState) reader.ReadInt32();
 					var data = (JObject)JToken.ReadFrom(new BsonReader(reader));
 					var persistedEvent = new PersistedEvent
 						{
-							Data = data, Metadata = metadata, Previous = previous
+							Data = data, 
+							Previous = previous,
+							State = state
 						};
 					cache.Set(itemPos, persistedEvent);
 					yield return persistedEvent;
@@ -129,13 +132,13 @@ namespace Rhino.Events.Storage
 
 		private IEnumerable<PersistedEvent> ReadFromCache(long previous)
 		{
-			if (previous == DoesNotExists)
+			if (previous == DoesNotExists || previous == Deleted)
 				yield break;
 
 			var persistedEvent = cache.Get(previous);
 			while (persistedEvent != null)
 			{
-				if (previous == DoesNotExists)
+				if (previous == DoesNotExists || previous == Deleted)
 					yield break;
 
 				previous = persistedEvent.Previous;
@@ -191,13 +194,13 @@ namespace Rhino.Events.Storage
 				binaryWriter.Write(item.Id);
 				binaryWriter.Write(prevPos);
 
-				item.Metadata.WriteTo(new BsonWriter(binaryWriter));
+				binaryWriter.Write((int)item.State);
 				item.Data.WriteTo(new BsonWriter(binaryWriter));
 
 				cache.Set(currentPos, new PersistedEvent
 					{
 						Data = item.Data,
-						Metadata = item.Metadata,
+						State = item.State,
 						Previous = prevPos
 					});
 
@@ -205,7 +208,18 @@ namespace Rhino.Events.Storage
 					{
 						if (exception == null)
 						{
-							idToPos.AddOrUpdate(item.Id, currentPos, (s, l) => currentPos);
+							switch (item.State)
+							{
+								case EventState.Event:
+								case EventState.Snapshot:
+									idToPos.AddOrUpdate(item.Id, currentPos, (s, l) => currentPos);
+									break;
+								case EventState.Delete:
+									idToPos.AddOrUpdate(item.Id, Deleted, (s, l) => Deleted);
+									break;
+								default:
+									throw new ArgumentOutOfRangeException(item.State.ToString());
+							}
 							item.TaskCompletionSource.SetResult(null);
 						}
 						else
@@ -247,15 +261,14 @@ namespace Rhino.Events.Storage
 			}
 		}
 
-		public Task EnqueueAsync(string id, JObject metadata, JObject data)
+		public Task EnqueueAsync(string id, EventState state, JObject data)
 		{
-
 			AssertValidState();
 
 			var item = new WriteState
 				{
 					Data = data,
-					Metadata = metadata,
+					State = state,
 					Id = id
 				};
 

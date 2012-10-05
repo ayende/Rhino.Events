@@ -2,9 +2,9 @@ using Newtonsoft.Json.Linq;
 
 namespace Rhino.Events.Data
 {
-	public class Event
+	public class EventData
 	{
 		public JObject Data;
-		public JObject Metadata;
+		public EventState State;
 	}
 }
