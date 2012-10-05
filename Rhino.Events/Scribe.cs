@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Rhino.Events.Data;
 using Rhino.Events.Storage;
 
 namespace Rhino.Events
@@ -33,25 +34,17 @@ namespace Rhino.Events
 
 		public Task EnqueueEventAsync(string streamId, object @event)
 		{
-			return EnqueueInternalAsync(streamId, @event, "Event");
+			return eventsStorage.EnqueueAsync(streamId, EventState.Event, GetSerialized(@event));
 		}
 
 		public Task EnqueueSnapshotAsync(string streamId, object @event)
 		{
-			return EnqueueInternalAsync(streamId, @event, "Snapshot");
+			return eventsStorage.EnqueueAsync(streamId, EventState.Snapshot, GetSerialized(@event));
 		}
 
 		public Task EnqueueDeleteAsync(string streamId)
 		{
-			return EnqueueInternalAsync(streamId, null, "Delete");
-		}
-
-		private Task EnqueueInternalAsync(string streamId, object @event, string type)
-		{
-			return eventsStorage.EnqueueAsync(streamId, new JObject
-				{
-					{"Type", type}
-				}, GetSerialized(@event));
+			return eventsStorage.EnqueueAsync(streamId, EventState.Delete, null);
 		}
 
 		private JObject GetSerialized(object obj)

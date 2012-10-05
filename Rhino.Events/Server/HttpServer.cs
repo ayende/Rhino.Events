@@ -4,6 +4,7 @@ using System.Net;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Rhino.Events.Data;
 using Rhino.Events.Storage;
 
 namespace Rhino.Events.Server
@@ -55,10 +56,12 @@ namespace Rhino.Events.Server
 						if(string.IsNullOrWhiteSpace(id))
 							throw new ArgumentException("id query string must have a value");
 
-						var metadata = value.Value<JObject>("@metadata") ?? new JObject();
-						value.Remove("@metadata");
+						var stateStr = ctx.Request.QueryString["state"];
 
-						await data.EnqueueAsync(id, metadata, value);
+						EventState state;
+						Enum.TryParse(stateStr, out state);
+
+						await data.EnqueueAsync(id, state, value);
 
 						break;
 					case "GET":
@@ -84,7 +87,8 @@ namespace Rhino.Events.Server
 							
 							writer.WritePropertyName("@metadata");
 							writer.WriteStartObject();
-							item.Metadata.WriteTo(writer);
+							writer.WritePropertyName("State");
+							writer.WriteValue(item.State);
 							writer.WriteEndObject();
 
 							item.Data.WriteTo(writer);

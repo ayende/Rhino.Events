@@ -195,7 +195,10 @@ namespace Rhino.Events.Storage
 				binaryWriter.Write(prevPos);
 
 				binaryWriter.Write((int)item.State);
-				item.Data.WriteTo(new BsonWriter(binaryWriter));
+
+				var jObject = item.Data ?? new JObject();// to handle null for deletes
+
+				jObject.WriteTo(new BsonWriter(binaryWriter));
 
 				cache.Set(currentPos, new PersistedEvent
 					{
