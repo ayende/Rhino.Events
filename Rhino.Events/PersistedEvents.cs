@@ -10,19 +10,28 @@ using Newtonsoft.Json.Linq;
 
 namespace Rhino.Events
 {
-	public class OnDiskData : IDisposable
+	public class PersistedEvents : IDisposable
 	{
+		private const long DoesNotExists = -1;
+
 		private readonly IStreamSource streamSource;
 		private readonly string path;
 		private readonly Stream file;
-		private readonly Thread writerThread;
+		private readonly Task writerThread;
 		private readonly ManualResetEventSlim hasItems = new ManualResetEventSlim(false);
 		private readonly ConcurrentQueue<WriteState> writer = new ConcurrentQueue<WriteState>();
 		private readonly CancellationTokenSource cts = new CancellationTokenSource();
 		private readonly JsonDataCache<Tuple<JObject, long>> cache = new JsonDataCache<Tuple<JObject, long>>();
 		private readonly ConcurrentDictionary<string, long> idToPos = new ConcurrentDictionary<string, long>(StringComparer.InvariantCultureIgnoreCase);
 		private readonly BinaryWriter binaryWriter;
+		
 		private DateTime lastWrite;
+		bool hadWrites;
+
+		private volatile bool disposed;
+		private volatile Exception corruptingException;
+
+
 		private class WriteState
 		{
 			public readonly TaskCompletionSource<object> TaskCompletionSource = new TaskCompletionSource<object>();
@@ -30,7 +39,7 @@ namespace Rhino.Events
 			public JObject Data;
 		}
 
-		public OnDiskData(IStreamSource streamSource, string dirPath)
+		public PersistedEvents(IStreamSource streamSource, string dirPath)
 		{
 			this.streamSource = streamSource;
 			path = Path.Combine(dirPath, "data.events");
@@ -39,20 +48,38 @@ namespace Rhino.Events
 
 			binaryWriter = new BinaryWriter(file, Encoding.UTF8, leaveOpen: true);
 
-			writerThread = new Thread(WriteToDisk)
+			writerThread = Task.Factory.StartNew(() =>
 				{
-					IsBackground = true
-				};
-			writerThread.Start();
+					try
+					{
+						WriteToDisk();
+					}
+					catch (Exception e)
+					{
+						corruptingException = e;
+					}
+				});
 		}
 
 		public IEnumerable<JObject> Read(string id)
 		{
+			AssertValidState();
+
 			long previous;
 			if (idToPos.TryGetValue(id, out previous) == false)
 				return null;
 
 			return ReadInternal(previous);
+		}
+
+		private void AssertValidState()
+		{
+			var exception = corruptingException;
+			if (exception != null)
+				throw new InvalidOperationException("Instance state corrupted, can't read", exception);
+
+			if(disposed)
+				throw new ObjectDisposedException("PersistedEvents");
 		}
 
 		private IEnumerable<JObject> ReadInternal(long previous)
@@ -74,7 +101,7 @@ namespace Rhino.Events
 						yield return p.Item1;
 					}
 
-					if (previous == -1)
+					if (previous == DoesNotExists)
 						yield break;
 
 					var itemPos = previous;
@@ -90,13 +117,13 @@ namespace Rhino.Events
 
 		private IEnumerable<Tuple<JObject, long>> ReadFromCache(long previous)
 		{
-			if (previous == -1)
+			if (previous == DoesNotExists)
 				yield break;
 
 			var tuple = cache.Get(previous);
 			while (tuple != null)
 			{
-				if (previous == -1)
+				if (previous == DoesNotExists)
 					yield break;
 
 				previous = tuple.Item2;
@@ -106,8 +133,6 @@ namespace Rhino.Events
 				tuple = cache.Get(previous);
 			}
 		}
-
-		bool hadWrites;
 
 		private void WriteToDisk()
 		{
@@ -148,7 +173,7 @@ namespace Rhino.Events
 
 				long prevPos;
 				if (idToPos.TryGetValue(item.Id, out prevPos) == false)
-					prevPos = -1;
+					prevPos = DoesNotExists;
 
 				var currentPos = file.Position;
 				binaryWriter.Write(item.Id);
@@ -204,8 +229,11 @@ namespace Rhino.Events
 			}
 		}
 
-		public Task Enqueue(string id, JObject data)
+		public Task EnqueueAsync(string id, JObject data)
 		{
+
+			AssertValidState();
+
 			var item = new WriteState
 				{
 					Data = data,
@@ -219,18 +247,17 @@ namespace Rhino.Events
 
 		public void Dispose()
 		{
-			try
-			{
-				cts.Cancel();
-			}
-			finally
-			{
-				writerThread.Join();
-				binaryWriter.Dispose();
-				file.Dispose();
-				cache.Dispose();
-				hasItems.Dispose();
-			}
+			var e = new ExceptionAggregator();
+			e.Execute(cts.Cancel);
+			e.Execute(writerThread.Wait);
+			e.Execute(binaryWriter.Dispose);
+			e.Execute(file.Dispose);
+			e.Execute(cache.Dispose);
+			e.Execute(hasItems.Dispose);
+
+			e.ThrowIfNeeded();
+
+			disposed = true;
 		}
 	}
 }
