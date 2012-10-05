@@ -61,7 +61,7 @@ namespace Rhino.Events
 
 		public void Dispose()
 		{
-			throw new NotImplementedException();
+			eventsStorage.Dispose();
 		}
 	}
 }
