@@ -20,7 +20,7 @@ namespace Rhino.Events
 		public Scribe()
 			: this(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ScribedEvents"))
 		{
-			
+
 		}
 
 		public Scribe(string dir)
@@ -41,10 +41,10 @@ namespace Rhino.Events
 			eventsStorage = new PersistedEventsStorage(options);
 		}
 
-		public IEnumerable<object> ReadRaw(string streamId)
+		public IEnumerable<object> ReadRaw(string streamId, bool untilLastSnapshot = true)
 		{
 			var eventDatas = eventsStorage.Read(streamId);
-			if(eventDatas == null)
+			if (eventDatas == null)
 				yield break;
 
 			foreach (var data in eventDatas)
@@ -52,6 +52,10 @@ namespace Rhino.Events
 				var typeString = data.Metadata.Value<string>("Clr-Type");
 				var clrType = FindClrType(typeString);
 				yield return Serializer.Deserialize(new JTokenReader(data.Data), clrType);
+				if (data.State.HasFlag(EventState.Snapshot) && untilLastSnapshot)
+				{
+					yield break;
+				}
 			}
 		}
 
@@ -76,17 +80,17 @@ namespace Rhino.Events
 
 		public Task EnqueueDeleteAsync(string streamId)
 		{
-			return eventsStorage.EnqueueAsync(streamId, EventState.Delete, new JObject(),  new JObject());
+			return eventsStorage.EnqueueAsync(streamId, EventState.Delete, new JObject(), new JObject());
 		}
 
 		private JObject GetSerialized(object obj)
 		{
-			if(obj == null)
+			if (obj == null)
 				return new JObject();
-			
+
 			var jTokenWriter = new JTokenWriter();
 			Serializer.Serialize(jTokenWriter, obj);
-			var jObject = (JObject) jTokenWriter.Token;
+			var jObject = (JObject)jTokenWriter.Token;
 			return jObject;
 		}
 

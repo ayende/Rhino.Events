@@ -52,7 +52,7 @@ namespace Rhino.Events.Tests
 		}
 
 		[Fact]
-		public void CanHandleCorrupteData()
+		public void CanHandleCorruptedData()
 		{
 			using (var s = NewScribe())
 			{
@@ -107,6 +107,33 @@ namespace Rhino.Events.Tests
 
 				Assert.Equal("Oren Eini", ((UserNameChanged)items[0]).NewName);
 				Assert.Equal("Oren", ((NewUserCreated)items[1]).Name);
+			}
+		}
+
+		[Fact]
+		public void CanCloseAndOpenAndReadAndRememberDelete()
+		{
+			using (var s = NewScribe())
+			{
+				s.EnqueueEventAsync("users/1", new NewUserCreated
+				{
+					UserId = "users/1",
+					Name = "Oren"
+				}).Wait();
+
+				s.EnqueueEventAsync("users/1", new UserNameChanged
+				{
+					UserId = "users/1",
+					NewName = "Oren Eini"
+				}).Wait();
+
+				s.EnqueueDeleteAsync("users/1").Wait();
+			}
+
+			using (var s = NewScribe())
+			{
+				var items = s.ReadRaw("users/1").ToArray();
+				Assert.Empty(items);
 			}
 		}
 	}

@@ -43,9 +43,11 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="BasicPersistence.cs" />
+    <Compile Include="Events.cs" />
     <Compile Include="EventsTest.cs" />
     <Compile Include="Events\NewUserCreated.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Snapshots\UserSnapshot.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Rhino.Events\Rhino.Events.csproj">
