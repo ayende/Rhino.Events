@@ -2,17 +2,20 @@ using System;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Linq;
+using Rhino.Events.Data;
 
 namespace Rhino.Events.Impl
 {
 	public class JsonDataCache<T> : IDisposable
 		where T : class
 	{
-		private int weakMaxSize = 2500;
-		private int hardMaxSize = 10000;
-		private int checkOncePer = 100;
-
+		private readonly PersistedOptions options;
 		private ConcurrentDictionary<long, CacheData> cache = new ConcurrentDictionary<long, CacheData>();
+
+		public JsonDataCache(PersistedOptions options)
+		{
+			this.options = options;
+		}
 
 		private int sets;
 
@@ -47,7 +50,7 @@ namespace Rhino.Events.Impl
 
 
 			var currentSet = Interlocked.Increment(ref sets);
-			if (cache.Count <= weakMaxSize || currentSet%checkOncePer != 0)
+			if (cache.Count <= options.WeakMaxSize || currentSet% options.CheckOncePer!= 0)
 				return;
 
 			// release the strong references to them, but keep the weak ones
@@ -56,7 +59,7 @@ namespace Rhino.Events.Impl
 				source.Value.Data = null;
 			}
 
-			if(cache.Count <= hardMaxSize)
+			if(cache.Count <= options.HardMaxSize)
 				return;
 
 			foreach (var source in cache.OrderBy(x => x.Value.Usage).Take(cache.Count / 4))

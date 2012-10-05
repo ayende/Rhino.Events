@@ -29,11 +29,12 @@ namespace Rhino.Events.Storage
 		private readonly ManualResetEventSlim hasItems = new ManualResetEventSlim(false);
 		private readonly ConcurrentQueue<WriteState> writer = new ConcurrentQueue<WriteState>();
 		private readonly CancellationTokenSource cts = new CancellationTokenSource();
-		private readonly JsonDataCache<PersistedEvent> cache = new JsonDataCache<PersistedEvent>();
+		private readonly JsonDataCache<PersistedEvent> cache;
 		private readonly ConcurrentDictionary<string, StreamInformation> idToPos = new ConcurrentDictionary<string, StreamInformation>(StringComparer.InvariantCultureIgnoreCase);
 		private readonly BinaryWriter binaryWriter;
 
 		private long eventsCount;
+		private long deleteCount;
 
 		private DateTime lastWrite;
 		bool hadWrites;
@@ -53,6 +54,7 @@ namespace Rhino.Events.Storage
 
 		public PersistedEventsStorage(PersistedOptions options)
 		{
+			cache = new JsonDataCache<PersistedEvent>(options);
 			this.options = options;
 			streamSource = options.StreamSource;
 			path = Path.Combine(options.DirPath, "data.events");
@@ -118,11 +120,16 @@ namespace Rhino.Events.Storage
 									});
 							break;
 						case EventState.Delete:
-							idToPos[persistedEvent.Id] = new StreamInformation
+							var streamInformation = new StreamInformation
 								{
 									LastPosition = Deleted,
 									StreamLength = 0
 								};
+							idToPos.AddOrUpdate(persistedEvent.Id, s => streamInformation, (s, information) =>
+								{
+									deleteCount += information.StreamLength;
+									return streamInformation;
+								});
 							break;
 						default:
 							throw new ArgumentOutOfRangeException(persistedEvent.State.ToString());
@@ -300,7 +307,7 @@ namespace Rhino.Events.Storage
 			}
 		}
 
-		
+
 		private Action<Exception> CreateCompletionAction(List<Action<Exception>> tasksToNotify, WriteState item, long currentPos)
 		{
 			return exception =>
@@ -333,15 +340,16 @@ namespace Rhino.Events.Storage
 							});
 					break;
 				case EventState.Delete:
-					idToPos.AddOrUpdate(item.Id, s => new StreamInformation
+					var streamInformation = new StreamInformation
 						{
 							LastPosition = Deleted,
 							StreamLength = 0
-						}, (s, l) => new StreamInformation
-							{
-								LastPosition = Deleted,
-								StreamLength = 0
-							});
+						};
+					idToPos.AddOrUpdate(item.Id, s => streamInformation, (s, l) =>
+						{
+							deleteCount += l.StreamLength;
+							return streamInformation;
+						});
 					break;
 				default:
 					throw new ArgumentOutOfRangeException(item.State.ToString());
