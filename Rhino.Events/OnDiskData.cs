@@ -11,44 +11,45 @@ using Newtonsoft.Json.Linq;
 namespace Rhino.Events
 {
 	public class OnDiskData : IDisposable
-    {
-	    private readonly IStreamSource streamSource;
-	    private readonly string path;
-	    private readonly Stream file;
-	    private readonly Thread writerThread;
+	{
+		private readonly IStreamSource streamSource;
+		private readonly string path;
+		private readonly Stream file;
+		private readonly Thread writerThread;
 		private readonly ManualResetEventSlim hasItems = new ManualResetEventSlim(false);
 		private readonly ConcurrentQueue<WriteState> writer = new ConcurrentQueue<WriteState>();
 		private readonly CancellationTokenSource cts = new CancellationTokenSource();
 		private readonly JsonDataCache<Tuple<JObject, long>> cache = new JsonDataCache<Tuple<JObject, long>>();
 		private readonly ConcurrentDictionary<string, long> idToPos = new ConcurrentDictionary<string, long>(StringComparer.InvariantCultureIgnoreCase);
-	    private readonly BinaryWriter binaryWriter;
+		private readonly BinaryWriter binaryWriter;
 		private DateTime lastWrite;
-	    private class WriteState
+		private class WriteState
 		{
 			public readonly TaskCompletionSource<object> TaskCompletionSource = new TaskCompletionSource<object>();
 			public string Id;
 			public JObject Data;
 		}
-	
-	    public OnDiskData(IStreamSource streamSource,string dirPath)
-	    {
-		    this.streamSource = streamSource;
-		    path = Path.Combine(dirPath, "data.events");
-		    file = streamSource.OpenWrite(path);
 
-		    binaryWriter = new BinaryWriter(file, Encoding.UTF8, leaveOpen:true);
+		public OnDiskData(IStreamSource streamSource, string dirPath)
+		{
+			this.streamSource = streamSource;
+			path = Path.Combine(dirPath, "data.events");
+			file = streamSource.OpenWrite(path);
+			MaxDurationForFlush = TimeSpan.FromMilliseconds(200);
 
-		    writerThread = new Thread(WriteToDisk)
-			    {
-				    IsBackground = true
-			    };
-		    writerThread.Start();
-	    }
+			binaryWriter = new BinaryWriter(file, Encoding.UTF8, leaveOpen: true);
+
+			writerThread = new Thread(WriteToDisk)
+				{
+					IsBackground = true
+				};
+			writerThread.Start();
+		}
 
 		public IEnumerable<JObject> Read(string id)
 		{
 			long previous;
-			if(idToPos.TryGetValue(id, out previous)==false)
+			if (idToPos.TryGetValue(id, out previous) == false)
 				return null;
 
 			return ReadInternal(previous);
@@ -80,16 +81,16 @@ namespace Rhino.Events
 					stream.Position = previous;
 					reader.ReadString(); // skip the id
 					previous = reader.ReadInt64();
-					var item = (JObject) JToken.ReadFrom(new BsonReader(reader));
+					var item = (JObject)JToken.ReadFrom(new BsonReader(reader));
 					cache.Set(itemPos, Tuple.Create(item, previous));
 					yield return item;
 				}
 			}
 		}
 
-		private IEnumerable<Tuple<JObject,long>> ReadFromCache(long previous)
+		private IEnumerable<Tuple<JObject, long>> ReadFromCache(long previous)
 		{
-			if(previous == -1)
+			if (previous == -1)
 				yield break;
 
 			var tuple = cache.Get(previous);
@@ -109,10 +110,10 @@ namespace Rhino.Events
 		bool hadWrites;
 
 		private void WriteToDisk()
-	    {
-		    var tasksToNotify = new List<Action<Exception>>(); 
-		    while (true)
-		    {
+		{
+			var tasksToNotify = new List<Action<Exception>>();
+			while (true)
+			{
 				if (cts.IsCancellationRequested)
 				{
 					FlushToDisk(tasksToNotify);
@@ -120,9 +121,9 @@ namespace Rhino.Events
 				}
 
 				WriteState item;
-				if(hadWrites)
+				if (hadWrites)
 				{
-					if ((DateTime.UtcNow - lastWrite).TotalSeconds > 1)
+					if ((DateTime.UtcNow - lastWrite) > MaxDurationForFlush)
 					{
 						// we have to flush to disk now, because we have writes and nothing else is forthcoming
 						// or we have so many writes, that we need to flush to clear the buffers
@@ -133,7 +134,7 @@ namespace Rhino.Events
 				}
 				if (writer.TryDequeue(out item) == false)
 				{
-					if(hadWrites)
+					if (hadWrites)
 					{
 						FlushToDisk(tasksToNotify);
 					}
@@ -145,21 +146,21 @@ namespace Rhino.Events
 					continue;
 				}
 
-			    long prevPos;
-			    if(idToPos.TryGetValue(item.Id, out prevPos) == false)
-				    prevPos = -1;
+				long prevPos;
+				if (idToPos.TryGetValue(item.Id, out prevPos) == false)
+					prevPos = -1;
 
-			    var currentPos = file.Position;
+				var currentPos = file.Position;
 				binaryWriter.Write(item.Id);
-			    binaryWriter.Write(prevPos);
-				
+				binaryWriter.Write(prevPos);
+
 				item.Data.WriteTo(new BsonWriter(binaryWriter));
 
 				cache.Set(currentPos, Tuple.Create(item.Data, prevPos));
 
 				tasksToNotify.Add(exception =>
 					{
-						if(exception == null)
+						if (exception == null)
 						{
 							idToPos.AddOrUpdate(item.Id, currentPos, (s, l) => currentPos);
 							item.TaskCompletionSource.SetResult(null);
@@ -169,10 +170,12 @@ namespace Rhino.Events
 							item.TaskCompletionSource.SetException(exception);
 						}
 					});
-				
+
 				hadWrites = true;
-		    }
-	    }
+			}
+		}
+
+		public TimeSpan MaxDurationForFlush { get; set; }
 
 		private void FlushToDisk(ICollection<Action<Exception>> tasksToNotify)
 		{
@@ -197,37 +200,37 @@ namespace Rhino.Events
 
 				tasksToNotify.Clear();
 				lastWrite = DateTime.UtcNow;
-				hadWrites = false;	
+				hadWrites = false;
 			}
 		}
 
 		public Task Enqueue(string id, JObject data)
-	    {
-		    var item = new WriteState
-			    {
-				    Data = data,
-				    Id = id
-			    };
+		{
+			var item = new WriteState
+				{
+					Data = data,
+					Id = id
+				};
 
 			writer.Enqueue(item);
 			hasItems.Set();
-		    return item.TaskCompletionSource.Task;
-	    }
+			return item.TaskCompletionSource.Task;
+		}
 
-	    public void Dispose()
-	    {
-		    try
-		    {
+		public void Dispose()
+		{
+			try
+			{
 				cts.Cancel();
-		    }
-		    finally
-		    {
-			    writerThread.Join();
-			    binaryWriter.Dispose();
-			    file.Dispose();
+			}
+			finally
+			{
+				writerThread.Join();
+				binaryWriter.Dispose();
+				file.Dispose();
 				cache.Dispose();
 				hasItems.Dispose();
-		    }
-	    }
-    }
+			}
+		}
+	}
 }
