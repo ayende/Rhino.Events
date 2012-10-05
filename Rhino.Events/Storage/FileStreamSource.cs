@@ -4,13 +4,12 @@ namespace Rhino.Events.Storage
 {
 	public class FileStreamSource : IStreamSource
 	{
-		public Stream OpenWrite(string path)
+		public Stream OpenReadWrite(string path)
 		{
 			var dir = Path.GetDirectoryName(path);
 			if (Directory.Exists(dir) == false)
 				Directory.CreateDirectory(dir);
 			var fileStream = File.Open(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
-			fileStream.Seek(0, SeekOrigin.End);
 			return fileStream;
 		}
 

@@ -28,7 +28,7 @@ namespace Rhino.Events.Storage
 		private readonly JsonDataCache<PersistedEvent> cache = new JsonDataCache<PersistedEvent>();
 		private readonly ConcurrentDictionary<string, long> idToPos = new ConcurrentDictionary<string, long>(StringComparer.InvariantCultureIgnoreCase);
 		private readonly BinaryWriter binaryWriter;
-		
+
 		private DateTime lastWrite;
 		bool hadWrites;
 
@@ -49,7 +49,10 @@ namespace Rhino.Events.Storage
 		{
 			this.streamSource = streamSource;
 			path = Path.Combine(dirPath, "data.events");
-			file = streamSource.OpenWrite(path);
+			file = streamSource.OpenReadWrite(path);
+
+			ReadAllFromDisk();
+
 			MaxDurationForFlush = TimeSpan.FromMilliseconds(200);
 
 			binaryWriter = new BinaryWriter(file, Encoding.UTF8, leaveOpen: true);
@@ -67,6 +70,40 @@ namespace Rhino.Events.Storage
 				});
 		}
 
+		private void ReadAllFromDisk()
+		{
+			while (true)
+			{
+				using (var reader = new BinaryReader(file, Encoding.UTF8, leaveOpen: true))
+				{
+					var itemPos = file.Position;
+					PersistedEvent persistedEvent;
+					try
+					{
+						persistedEvent = ReadPersistedEvent(reader);
+					}
+					catch (EndOfStreamException)
+					{
+						return;
+					}
+					switch (persistedEvent.State)
+					{
+						case EventState.Event:
+						case EventState.Snapshot:
+							idToPos[persistedEvent.Id] = itemPos;
+							break;
+						case EventState.Delete:
+							idToPos[persistedEvent.Id] = Deleted;
+							break;
+						default:
+							throw new ArgumentOutOfRangeException(persistedEvent.State.ToString());
+					}
+
+				}
+			}
+
+		}
+
 		public IEnumerable<EventData> Read(string id)
 		{
 			AssertValidState();
@@ -75,7 +112,7 @@ namespace Rhino.Events.Storage
 			if (idToPos.TryGetValue(id, out previous) == false)
 				return null;
 
-			return ReadInternal(previous).Select(x=>new EventData
+			return ReadInternal(previous).Select(x => new EventData
 				{
 					Data = x.Data,
 					State = x.State,
@@ -89,7 +126,7 @@ namespace Rhino.Events.Storage
 			if (exception != null)
 				throw new InvalidOperationException("Instance state corrupted, can't read", exception);
 
-			if(disposed)
+			if (disposed)
 				throw new ObjectDisposedException("PersistedEventsStorage");
 		}
 
@@ -117,22 +154,29 @@ namespace Rhino.Events.Storage
 
 					var itemPos = previous;
 					stream.Position = previous;
-					reader.ReadString(); // skip the id
-					previous = reader.ReadInt64();
-					var state = (EventState) reader.ReadInt32();
-					var metadata = (JObject)JToken.ReadFrom(new BsonReader(reader));
-					var data = (JObject)JToken.ReadFrom(new BsonReader(reader));
-					var persistedEvent = new PersistedEvent
-						{
-							Data = data, 
-							Metadata =  metadata,
-							Previous = previous,
-							State = state
-						};
+					var persistedEvent = ReadPersistedEvent(reader);
+					previous = persistedEvent.Previous;
 					cache.Set(itemPos, persistedEvent);
 					yield return persistedEvent;
 				}
 			}
+		}
+
+		private static PersistedEvent ReadPersistedEvent(BinaryReader reader)
+		{
+			var id = reader.ReadString();
+			long previous = reader.ReadInt64();
+			var state = (EventState)reader.ReadInt32();
+			var metadata = (JObject)JToken.ReadFrom(new BsonReader(reader));
+			var data = (JObject)JToken.ReadFrom(new BsonReader(reader));
+			return new PersistedEvent
+				{
+					Id = id,
+					Data = data,
+					Metadata = metadata,
+					Previous = previous,
+					State = state,
+				};
 		}
 
 		private IEnumerable<PersistedEvent> ReadFromCache(long previous)
@@ -206,6 +250,7 @@ namespace Rhino.Events.Storage
 
 				cache.Set(currentPos, new PersistedEvent
 					{
+						Id = item.Id,
 						Data = item.Data,
 						State = item.State,
 						Previous = prevPos,
@@ -277,7 +322,7 @@ namespace Rhino.Events.Storage
 				{
 					Data = data,
 					State = state,
-					Metadata =metadata,
+					Metadata = metadata,
 					Id = id
 				};
 
