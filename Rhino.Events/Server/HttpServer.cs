@@ -10,12 +10,12 @@ namespace Rhino.Events.Server
 {
 	public class HttpServer : IDisposable
 	{
-		private readonly PersistedEvents data;
+		private readonly PersistedEventsStorage data;
 		private readonly HttpListener httpListener;
 
 		public HttpServer()
 		{
-			data = new PersistedEvents(new FileStreamSource(), "Data");
+			data = new PersistedEventsStorage(new FileStreamSource(), "Data");
 
 			httpListener = new HttpListener
 				{

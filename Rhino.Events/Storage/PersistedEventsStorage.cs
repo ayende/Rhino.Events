@@ -13,7 +13,7 @@ using Rhino.Events.Impl;
 
 namespace Rhino.Events.Storage
 {
-	public class PersistedEvents : IDisposable
+	public class PersistedEventsStorage : IDisposable
 	{
 		private const long DoesNotExists = -1;
 
@@ -42,7 +42,7 @@ namespace Rhino.Events.Storage
 			public JObject Metadata;
 		}
 
-		public PersistedEvents(IStreamSource streamSource, string dirPath)
+		public PersistedEventsStorage(IStreamSource streamSource, string dirPath)
 		{
 			this.streamSource = streamSource;
 			path = Path.Combine(dirPath, "data.events");
@@ -86,7 +86,7 @@ namespace Rhino.Events.Storage
 				throw new InvalidOperationException("Instance state corrupted, can't read", exception);
 
 			if(disposed)
-				throw new ObjectDisposedException("PersistedEvents");
+				throw new ObjectDisposedException("PersistedEventsStorage");
 		}
 
 		private IEnumerable<PersistedEvent> ReadInternal(long previous)
