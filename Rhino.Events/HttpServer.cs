@@ -54,7 +54,10 @@ namespace Rhino.Events
 						if(string.IsNullOrWhiteSpace(id))
 							throw new ArgumentException("id query string must have a value");
 
-						await data.Enqueue(id, value);
+						var metadata = value.Value<JObject>("@metadata") ?? new JObject();
+						value.Remove("@metadata");
+
+						await data.EnqueueAsync(id, metadata, value);
 
 						break;
 					case "GET":
@@ -76,7 +79,15 @@ namespace Rhino.Events
 
 						foreach (var item in stream)
 						{
-							item.WriteTo(writer);
+							writer.WriteStartObject();
+							
+							writer.WritePropertyName("@metadata");
+							writer.WriteStartObject();
+							item.Metadata.WriteTo(writer);
+							writer.WriteEndObject();
+
+							item.Data.WriteTo(writer);
+							writer.WriteEndObject();
 						}
 
 						writer.WriteEndArray();

@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Bson;
 using Newtonsoft.Json.Linq;
+using System.Linq;
 
 namespace Rhino.Events
 {
@@ -21,7 +22,7 @@ namespace Rhino.Events
 		private readonly ManualResetEventSlim hasItems = new ManualResetEventSlim(false);
 		private readonly ConcurrentQueue<WriteState> writer = new ConcurrentQueue<WriteState>();
 		private readonly CancellationTokenSource cts = new CancellationTokenSource();
-		private readonly JsonDataCache<Tuple<JObject, long>> cache = new JsonDataCache<Tuple<JObject, long>>();
+		private readonly JsonDataCache<PersistedEvent> cache = new JsonDataCache<PersistedEvent>();
 		private readonly ConcurrentDictionary<string, long> idToPos = new ConcurrentDictionary<string, long>(StringComparer.InvariantCultureIgnoreCase);
 		private readonly BinaryWriter binaryWriter;
 		
@@ -30,7 +31,6 @@ namespace Rhino.Events
 
 		private volatile bool disposed;
 		private volatile Exception corruptingException;
-
 
 		private class WriteState
 		{
@@ -62,7 +62,7 @@ namespace Rhino.Events
 				});
 		}
 
-		public IEnumerable<JObject> Read(string id)
+		public IEnumerable<Event> Read(string id)
 		{
 			AssertValidState();
 
@@ -70,7 +70,11 @@ namespace Rhino.Events
 			if (idToPos.TryGetValue(id, out previous) == false)
 				return null;
 
-			return ReadInternal(previous);
+			return ReadInternal(previous).Select(x=>new Event
+				{
+					Data = x.Data,
+					Metadata = x.Metadata
+				});
 		}
 
 		private void AssertValidState()
@@ -83,12 +87,12 @@ namespace Rhino.Events
 				throw new ObjectDisposedException("PersistedEvents");
 		}
 
-		private IEnumerable<JObject> ReadInternal(long previous)
+		private IEnumerable<PersistedEvent> ReadInternal(long previous)
 		{
 			foreach (var p in ReadFromCache(previous))
 			{
-				previous = p.Item2;
-				yield return p.Item1;
+				previous = p.Previous;
+				yield return p;
 			}
 
 			using (var stream = streamSource.OpenRead(path))
@@ -98,8 +102,8 @@ namespace Rhino.Events
 				{
 					foreach (var p in ReadFromCache(previous))
 					{
-						previous = p.Item2;
-						yield return p.Item1;
+						previous = p.Previous;
+						yield return p;
 					}
 
 					if (previous == DoesNotExists)
@@ -109,29 +113,34 @@ namespace Rhino.Events
 					stream.Position = previous;
 					reader.ReadString(); // skip the id
 					previous = reader.ReadInt64();
-					var item = (JObject)JToken.ReadFrom(new BsonReader(reader));
-					cache.Set(itemPos, Tuple.Create(item, previous));
-					yield return item;
+					var metadata = (JObject)JToken.ReadFrom(new BsonReader(reader));
+					var data = (JObject)JToken.ReadFrom(new BsonReader(reader));
+					var persistedEvent = new PersistedEvent
+						{
+							Data = data, Metadata = metadata, Previous = previous
+						};
+					cache.Set(itemPos, persistedEvent);
+					yield return persistedEvent;
 				}
 			}
 		}
 
-		private IEnumerable<Tuple<JObject, long>> ReadFromCache(long previous)
+		private IEnumerable<PersistedEvent> ReadFromCache(long previous)
 		{
 			if (previous == DoesNotExists)
 				yield break;
 
-			var tuple = cache.Get(previous);
-			while (tuple != null)
+			var persistedEvent = cache.Get(previous);
+			while (persistedEvent != null)
 			{
 				if (previous == DoesNotExists)
 					yield break;
 
-				previous = tuple.Item2;
+				previous = persistedEvent.Previous;
 
-				yield return tuple;
+				yield return persistedEvent;
 
-				tuple = cache.Get(previous);
+				persistedEvent = cache.Get(previous);
 			}
 		}
 
@@ -183,7 +192,12 @@ namespace Rhino.Events
 				item.Metadata.WriteTo(new BsonWriter(binaryWriter));
 				item.Data.WriteTo(new BsonWriter(binaryWriter));
 
-				cache.Set(currentPos, Tuple.Create(item.Data, prevPos));
+				cache.Set(currentPos, new PersistedEvent
+					{
+						Data = item.Data,
+						Metadata = item.Metadata,
+						Previous = prevPos
+					});
 
 				tasksToNotify.Add(exception =>
 					{

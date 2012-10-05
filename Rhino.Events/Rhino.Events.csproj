@@ -50,7 +50,8 @@
     <Compile Include="JsonDataCache.cs" />
     <Compile Include="FileStreamSource.cs" />
     <Compile Include="IStreamSource.cs" />
-    <Compile Include="OnDiskData.cs" />
+    <Compile Include="Data\PersistedEvent.cs" />
+    <Compile Include="PersistedEvents.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
