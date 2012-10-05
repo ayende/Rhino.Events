@@ -50,6 +50,7 @@
     <Compile Include="Data\PersistedEvent.cs" />
     <Compile Include="Storage\PersistedEventsStorage.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Data\PersistedOptions.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

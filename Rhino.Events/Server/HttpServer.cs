@@ -16,7 +16,12 @@ namespace Rhino.Events.Server
 
 		public HttpServer()
 		{
-			data = new PersistedEventsStorage(new FileStreamSource(), "Data");
+			data = new PersistedEventsStorage(new PersistedOptions
+				{
+					StreamSource = new FileStreamSource(),
+					DirPath = "Data",
+					AllowRecovery = true
+				});
 
 			httpListener = new HttpListener
 				{

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -15,6 +16,7 @@ namespace Rhino.Events.Storage
 {
 	public class PersistedEventsStorage : IDisposable
 	{
+		private readonly PersistedOptions options;
 		private const long DoesNotExists = -1;
 		private const long Deleted = -2;
 
@@ -45,10 +47,11 @@ namespace Rhino.Events.Storage
 			public JObject Metadata;
 		}
 
-		public PersistedEventsStorage(IStreamSource streamSource, string dirPath)
+		public PersistedEventsStorage(PersistedOptions options)
 		{
-			this.streamSource = streamSource;
-			path = Path.Combine(dirPath, "data.events");
+			this.options = options;
+			streamSource = options.StreamSource;
+			path = Path.Combine(options.DirPath, "data.events");
 			file = streamSource.OpenReadWrite(path);
 
 			ReadAllFromDisk();
@@ -84,6 +87,14 @@ namespace Rhino.Events.Storage
 					}
 					catch (EndOfStreamException)
 					{
+						return;
+					}
+					catch(Exception e)
+					{
+						Trace.WriteLine("Error during initial events read: " + e);
+						if(options.AllowRecovery == false)
+							throw;
+						file.SetLength(itemPos);
 						return;
 					}
 					switch (persistedEvent.State)

@@ -24,16 +24,21 @@ namespace Rhino.Events
 		}
 
 		public Scribe(string dir)
-			: this(new FileStreamSource(), dir)
+			: this(new PersistedOptions
+				{
+					AllowRecovery = true,
+					StreamSource = new FileStreamSource(),
+					DirPath = dir
+				})
 		{
 
 		}
 
-		public Scribe(IStreamSource source, string dir)
+		public Scribe(PersistedOptions options)
 		{
 			Serializer = new JsonSerializer();
 			FindClrType = s => Type.GetType(s, throwOnError: true);
-			eventsStorage = new PersistedEventsStorage(source, dir);
+			eventsStorage = new PersistedEventsStorage(options);
 		}
 
 		public IEnumerable<object> ReadRaw(string streamId)
