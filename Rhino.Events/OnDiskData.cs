@@ -105,11 +105,12 @@ namespace Rhino.Events
 				tuple = cache.Get(previous);
 			}
 		}
-		bool hadWrites = false;
+
+		bool hadWrites;
 
 		private void WriteToDisk()
 	    {
-		    var tasksToNotify = new List<Action>(); 
+		    var tasksToNotify = new List<Action<Exception>>(); 
 		    while (true)
 		    {
 				if (cts.IsCancellationRequested)
@@ -156,29 +157,48 @@ namespace Rhino.Events
 
 				cache.Set(currentPos, Tuple.Create(item.Data, prevPos));
 
-				tasksToNotify.Add(() =>
+				tasksToNotify.Add(exception =>
 					{
-						idToPos.AddOrUpdate(item.Id, currentPos, (s, l) => currentPos);
-						item.TaskCompletionSource.SetResult(null);
+						if(exception == null)
+						{
+							idToPos.AddOrUpdate(item.Id, currentPos, (s, l) => currentPos);
+							item.TaskCompletionSource.SetResult(null);
+						}
+						else
+						{
+							item.TaskCompletionSource.SetException(exception);
+						}
 					});
 				
 				hadWrites = true;
 		    }
 	    }
 
-		private void FlushToDisk(ICollection<Action> tasksToNotify)
+		private void FlushToDisk(ICollection<Action<Exception>> tasksToNotify)
 		{
-			streamSource.Flush(file);
-
-			foreach (var taskCompletionSource in tasksToNotify)
+			try
 			{
-				taskCompletionSource();
+				streamSource.Flush(file);
+				foreach (var taskCompletionSource in tasksToNotify)
+				{
+					taskCompletionSource(null);
+				}
 			}
+			catch (Exception e)
+			{
+				foreach (var taskCompletionSource in tasksToNotify)
+				{
+					taskCompletionSource(e);
+				}
+				throw;
+			}
+			finally
+			{
 
-			tasksToNotify.Clear();
-			lastWrite = DateTime.UtcNow;
-			hadWrites = false;
-						
+				tasksToNotify.Clear();
+				lastWrite = DateTime.UtcNow;
+				hadWrites = false;	
+			}
 		}
 
 		public Task Enqueue(string id, JObject data)
