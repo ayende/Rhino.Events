@@ -8,8 +8,10 @@ using System.Threading.Tasks;
 using Newtonsoft.Json.Bson;
 using Newtonsoft.Json.Linq;
 using System.Linq;
+using Rhino.Events.Data;
+using Rhino.Events.Impl;
 
-namespace Rhino.Events
+namespace Rhino.Events.Storage
 {
 	public class PersistedEvents : IDisposable
 	{

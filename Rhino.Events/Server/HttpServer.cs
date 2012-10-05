@@ -4,8 +4,9 @@ using System.Net;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Rhino.Events.Storage;
 
-namespace Rhino.Events
+namespace Rhino.Events.Server
 {
 	public class HttpServer : IDisposable
 	{

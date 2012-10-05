@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 using System.Threading;
 using System.Linq;
 
-namespace Rhino.Events
+namespace Rhino.Events.Impl
 {
 	public class JsonDataCache<T> : IDisposable
 		where T : class

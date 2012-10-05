@@ -37,21 +37,16 @@
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
-    <Reference Include="System.Runtime.Caching" />
-    <Reference Include="System.Xml.Linq" />
-    <Reference Include="System.Data.DataSetExtensions" />
-    <Reference Include="Microsoft.CSharp" />
-    <Reference Include="System.Data" />
-    <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="ExceptionAggregator.cs" />
-    <Compile Include="HttpServer.cs" />
-    <Compile Include="JsonDataCache.cs" />
-    <Compile Include="FileStreamSource.cs" />
-    <Compile Include="IStreamSource.cs" />
+    <Compile Include="Data\Event.cs" />
+    <Compile Include="Impl\ExceptionAggregator.cs" />
+    <Compile Include="Server\HttpServer.cs" />
+    <Compile Include="Impl\JsonDataCache.cs" />
+    <Compile Include="Storage\FileStreamSource.cs" />
+    <Compile Include="Storage\IStreamSource.cs" />
     <Compile Include="Data\PersistedEvent.cs" />
-    <Compile Include="PersistedEvents.cs" />
+    <Compile Include="Storage\PersistedEvents.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

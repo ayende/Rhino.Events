@@ -1,6 +1,6 @@
 using System.IO;
 
-namespace Rhino.Events
+namespace Rhino.Events.Storage
 {
 	public class FileStreamSource : IStreamSource
 	{

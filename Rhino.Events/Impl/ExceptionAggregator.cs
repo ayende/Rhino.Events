@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 
-namespace Rhino.Events
+namespace Rhino.Events.Impl
 {
 	public class ExceptionAggregator
 	{
