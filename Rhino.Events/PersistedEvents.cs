@@ -37,6 +37,7 @@ namespace Rhino.Events
 			public readonly TaskCompletionSource<object> TaskCompletionSource = new TaskCompletionSource<object>();
 			public string Id;
 			public JObject Data;
+			public JObject Metadata;
 		}
 
 		public PersistedEvents(IStreamSource streamSource, string dirPath)
@@ -179,6 +180,7 @@ namespace Rhino.Events
 				binaryWriter.Write(item.Id);
 				binaryWriter.Write(prevPos);
 
+				item.Metadata.WriteTo(new BsonWriter(binaryWriter));
 				item.Data.WriteTo(new BsonWriter(binaryWriter));
 
 				cache.Set(currentPos, Tuple.Create(item.Data, prevPos));
@@ -229,7 +231,7 @@ namespace Rhino.Events
 			}
 		}
 
-		public Task EnqueueAsync(string id, JObject data)
+		public Task EnqueueAsync(string id, JObject metadata, JObject data)
 		{
 
 			AssertValidState();
@@ -237,6 +239,7 @@ namespace Rhino.Events
 			var item = new WriteState
 				{
 					Data = data,
+					Metadata = metadata,
 					Id = id
 				};
 
