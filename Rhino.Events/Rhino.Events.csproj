@@ -32,6 +32,7 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="Microsoft.CSharp" />
     <Reference Include="Newtonsoft.Json">
       <HintPath>..\packages\Newtonsoft.Json.4.5.9\lib\net40\Newtonsoft.Json.dll</HintPath>
     </Reference>
@@ -51,6 +52,14 @@
     <Compile Include="Storage\PersistedEventsStorage.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Data\PersistedOptions.cs" />
+    <Compile Include="Util\ILog.cs" />
+    <Compile Include="Util\ILogExtensions.cs" />
+    <Compile Include="Util\ILogManager.cs" />
+    <Compile Include="Util\LoggerExecutionWrapper.cs" />
+    <Compile Include="Util\LogLevel.cs" />
+    <Compile Include="Util\LogManager.cs" />
+    <Compile Include="Util\LogProviders\Log4NetLogManager.cs" />
+    <Compile Include="Util\LogProviders\NLogLogManager.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
