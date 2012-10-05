@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -33,6 +32,8 @@ namespace Rhino.Events.Storage
 		private readonly JsonDataCache<PersistedEvent> cache = new JsonDataCache<PersistedEvent>();
 		private readonly ConcurrentDictionary<string, long> idToPos = new ConcurrentDictionary<string, long>(StringComparer.InvariantCultureIgnoreCase);
 		private readonly BinaryWriter binaryWriter;
+
+		private long eventsCount;
 
 		private DateTime lastWrite;
 		bool hadWrites;
@@ -87,6 +88,7 @@ namespace Rhino.Events.Storage
 					try
 					{
 						persistedEvent = ReadPersistedEvent(reader);
+						eventsCount++;
 					}
 					catch (EndOfStreamException)
 					{
@@ -307,6 +309,7 @@ namespace Rhino.Events.Storage
 			try
 			{
 				streamSource.Flush(file);
+				eventsCount += tasksToNotify.Count;
 				foreach (var taskCompletionSource in tasksToNotify)
 				{
 					taskCompletionSource(null);
