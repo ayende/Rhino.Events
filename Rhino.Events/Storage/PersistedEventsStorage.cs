@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Net.Security;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,8 +24,9 @@ namespace Rhino.Events.Storage
 		private const long Deleted = -2;
 
 		private readonly IStreamSource streamSource;
-		private readonly string path;
-		private readonly Task writerThread;
+		private readonly string dataPath = "data.events";
+		private readonly string offsetsPath = "data.offsets";
+		private readonly Task writerTask;
 		private readonly ManualResetEventSlim hasItems = new ManualResetEventSlim(false);
 		private readonly ConcurrentQueue<WriteState> itemsToWrite = new ConcurrentQueue<WriteState>();
 		private readonly CancellationTokenSource cts = new CancellationTokenSource();
@@ -35,6 +37,10 @@ namespace Rhino.Events.Storage
 
 		private BinaryWriter binaryWriter;
 		private Stream file;
+
+
+		private long lastWriteSnapshotCount;
+		private DateTime lastWriteSnapshotTime;
 
 		private long eventsCount;
 		private long deleteCount;
@@ -55,16 +61,13 @@ namespace Rhino.Events.Storage
 			cache = new JsonDataCache<PersistedEvent>(options);
 			this.options = options;
 			streamSource = options.StreamSource;
-			path = Path.Combine(options.DirPath, "data.events");
-			file = streamSource.OpenReadWrite(path);
+			file = streamSource.OpenReadWrite(dataPath);
 
 			ReadAllFromDisk();
 
-			MaxDurationForFlush = TimeSpan.FromMilliseconds(200);
-
 			binaryWriter = new BinaryWriter(file, Encoding.UTF8, leaveOpen: true);
 
-			writerThread = Task.Factory.StartNew(() =>
+			writerTask = Task.Factory.StartNew(() =>
 				{
 					try
 					{
@@ -79,6 +82,7 @@ namespace Rhino.Events.Storage
 
 		private void ReadAllFromDisk()
 		{
+			file.Position = ReadOffsets(streamSource.GetLatestName(dataPath));
 			while (true)
 			{
 				using (var reader = new BinaryReader(file, Encoding.UTF8, leaveOpen: true))
@@ -92,6 +96,8 @@ namespace Rhino.Events.Storage
 					}
 					catch (EndOfStreamException)
 					{
+						lastWriteSnapshotCount = eventsCount;
+						lastWriteSnapshotTime = DateTime.UtcNow;
 						return;
 					}
 					catch (Exception e)
@@ -118,6 +124,7 @@ namespace Rhino.Events.Storage
 									});
 							break;
 						case EventState.Delete:
+							deleteCount++;
 							var streamInformation = new StreamInformation
 								{
 									LastPosition = Deleted,
@@ -135,7 +142,6 @@ namespace Rhino.Events.Storage
 
 				}
 			}
-
 		}
 
 		public IEnumerable<EventData> Read(string id)
@@ -153,7 +159,7 @@ namespace Rhino.Events.Storage
 
 				if(cachedReadStreams.TryDequeue(out stream) == false)
 				{
-					stream = streamSource.OpenRead(path);
+					stream = streamSource.OpenRead(dataPath);
 				}
 			}
 			finally
@@ -273,14 +279,14 @@ namespace Rhino.Events.Storage
 			{
 				if (cts.IsCancellationRequested)
 				{
-					FlushToDisk(tasksToNotify);
+					FlushToDisk(tasksToNotify, closing: true);
 					return;
 				}
 
 				WriteState item;
 				if (hadWrites)
 				{
-					if ((DateTime.UtcNow - lastWrite) > MaxDurationForFlush)
+					if ((DateTime.UtcNow - lastWrite) > options.MaxTimeToWaitForFlush)
 					{
 						// we have to flush to disk now, because we have writes and nothing else is forthcoming
 						// or we have so many writes, that we need to flush to clear the buffers
@@ -301,7 +307,7 @@ namespace Rhino.Events.Storage
 						{
 							// we waited enough time to be pretty sure we are idle
 							// and can run compaction without too much problems.
-							if (hasItems.Wait(options.MaxTimeToWaitForFlushingToDisk, cts.Token) == false)
+							if (hasItems.Wait(options.IdleTime, cts.Token) == false)
 							{
 								Compact();
 								continue;
@@ -344,12 +350,12 @@ namespace Rhino.Events.Storage
 		{
 			var newPositions = new Dictionary<string, StreamInformation>(StringComparer.InvariantCultureIgnoreCase);
 
-			var newFilePath = path + ".compacting";
+			var newFilePath = dataPath + ".compacting";
 			streamSource.DeleteIfExists(newFilePath);
 
 			using (var newFile = streamSource.OpenReadWrite(newFilePath))
 			using (var newWriter = new BinaryWriter(newFile))
-			using (var current = streamSource.OpenRead(path))
+			using (var current = streamSource.OpenRead(dataPath))
 			using (var reader = new BinaryReader(current))
 			{
 				while (true)
@@ -397,7 +403,7 @@ namespace Rhino.Events.Storage
 				try
 				{
 					newFile.Close();
-					streamSource.DeleteOnClose(path);
+					streamSource.DeleteOnClose(dataPath);
 
 					Stream result;
 					while (cachedReadStreams.TryDequeue(out result))
@@ -408,11 +414,13 @@ namespace Rhino.Events.Storage
 					binaryWriter.Dispose();
 					file.Dispose();
 
-					streamSource.RenameToLatest(newFilePath, path);
-
-					file = streamSource.OpenReadWrite(path);
+					streamSource.RenameToLatest(newFilePath, dataPath);
+					file = streamSource.OpenReadWrite(dataPath);
 					binaryWriter = new BinaryWriter(file, Encoding.UTF8, leaveOpen: true);
-
+					
+					streamSource.DeleteIfExists("data.offsets");
+					FlushOffsets();
+					
 					idToPos.Clear();
 					foreach (var val in newPositions)
 					{
@@ -486,9 +494,7 @@ namespace Rhino.Events.Storage
 			item.TaskCompletionSource.SetResult(null);
 		}
 
-		public TimeSpan MaxDurationForFlush { get; set; }
-
-		private void FlushToDisk(ICollection<Action<Exception>> tasksToNotify)
+		private void FlushToDisk(ICollection<Action<Exception>> tasksToNotify, bool closing = false)
 		{
 			try
 			{
@@ -497,6 +503,12 @@ namespace Rhino.Events.Storage
 				foreach (var taskCompletionSource in tasksToNotify)
 				{
 					taskCompletionSource(null);
+				}
+				if(closing || 
+					(eventsCount - lastWriteSnapshotCount) > options.WritesBetweenOffsetSnapshots ||
+					(eventsCount > lastWriteSnapshotCount) && (DateTime.UtcNow - lastWriteSnapshotTime) > options.MinTimeForOffsetSnapshots)
+				{
+					FlushOffsets();
 				}
 			}
 			catch (Exception e)
@@ -514,6 +526,70 @@ namespace Rhino.Events.Storage
 				lastWrite = DateTime.UtcNow;
 				hadWrites = false;
 			}
+		}
+
+		private long ReadOffsets(string currentFileName)
+		{
+			long position;
+			if (streamSource.Exists(offsetsPath) == false)
+				return 0;
+			using (var offsets = streamSource.OpenRead(offsetsPath))
+			using(var reader = new BinaryReader(offsets))
+			{
+				var fileName = reader.ReadString();
+				if(fileName != currentFileName)
+				{
+					// wrong file, skipping
+					streamSource.DeleteOnClose(offsetsPath);
+					return 0;
+				}
+				position = reader.ReadInt64();
+
+				while (true)
+				{
+					string key;
+					try
+					{
+						key = reader.ReadString();
+					}
+					catch (EndOfStreamException)
+					{
+						break;
+					}
+					var pos = reader.ReadInt64();
+					var count = reader.ReadInt32();
+
+					idToPos[key] = new StreamInformation
+						{
+							LastPosition = pos,
+							StreamLength = count
+						};
+				}
+			}
+
+			return position;
+		}
+
+		private void FlushOffsets()
+		{
+			lastWriteSnapshotCount = eventsCount;
+			lastWriteSnapshotTime = DateTime.UtcNow;
+
+			using(var offsets = streamSource.OpenReadWrite( offsetsPath + ".new"))
+			using(var writer = new BinaryWriter(offsets))
+			{
+				writer.Write(Path.GetFileName(streamSource.GetLatestName(dataPath)));
+				writer.Write(file.Position);
+				foreach (var streamInformation in idToPos)
+				{
+					writer.Write(streamInformation.Key);
+					writer.Write(streamInformation.Value.LastPosition);
+					writer.Write(streamInformation.Value.StreamLength);
+				}
+				writer.Flush();
+			}
+			streamSource.DeleteIfExists(offsetsPath);
+			streamSource.RenameToLatest(offsetsPath + ".new", offsetsPath);
 		}
 
 		public Task EnqueueAsync(string id, EventState state, JObject data, JObject metadata)
@@ -537,7 +613,7 @@ namespace Rhino.Events.Storage
 		{
 			var e = new ExceptionAggregator();
 			e.Execute(cts.Cancel);
-			e.Execute(writerThread.Wait);
+			e.Execute(writerTask.Wait);
 			e.Execute(binaryWriter.Dispose);
 			e.Execute(file.Dispose);
 			e.Execute(cache.Dispose);

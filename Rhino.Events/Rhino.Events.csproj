@@ -44,6 +44,7 @@
     <Compile Include="Data\EventState.cs" />
     <Compile Include="Data\StreamInformation.cs" />
     <Compile Include="Impl\ExceptionAggregator.cs" />
+    <Compile Include="IScribe.cs" />
     <Compile Include="Scribe.cs" />
     <Compile Include="Server\HttpServer.cs" />
     <Compile Include="Impl\JsonDataCache.cs" />
@@ -63,6 +64,7 @@
     <Compile Include="Util\LogProviders\NLogLogManager.cs" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="ClassDiagram1.cd" />
     <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

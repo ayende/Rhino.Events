@@ -18,7 +18,7 @@ namespace Rhino.Events.Server
 		{
 			data = new PersistedEventsStorage(new PersistedOptions
 				{
-					StreamSource = new FileStreamSource(),
+					StreamSource = new FileStreamSource("Data"),
 					DirPath = "Data",
 					AllowRecovery = true
 				});

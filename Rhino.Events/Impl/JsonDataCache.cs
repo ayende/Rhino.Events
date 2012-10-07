@@ -50,7 +50,7 @@ namespace Rhino.Events.Impl
 
 
 			var currentSet = Interlocked.Increment(ref sets);
-			if (cache.Count <= options.WeakMaxSize || currentSet% options.CheckOncePer!= 0)
+			if (cache.Count <= options.CacheWeakMaxSize || currentSet% options.ClearCacheAfterSetCalledTimes!= 0)
 				return;
 
 			// release the strong references to them, but keep the weak ones
@@ -59,7 +59,7 @@ namespace Rhino.Events.Impl
 				source.Value.Data = null;
 			}
 
-			if(cache.Count <= options.HardMaxSize)
+			if(cache.Count <= options.CacheHardMaxSize)
 				return;
 
 			foreach (var source in cache.OrderBy(x => x.Value.Usage).Take(cache.Count / 4))

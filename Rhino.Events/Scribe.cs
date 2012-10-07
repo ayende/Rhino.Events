@@ -9,14 +9,6 @@ using Rhino.Events.Storage;
 
 namespace Rhino.Events
 {
-	public interface IScribe : IDisposable
-	{
-		IEnumerable<object> ReadRaw(string streamId, bool untilLastSnapshot = true);
-		Task EnqueueEventAsync(string streamId, object @event);
-		Task EnqueueSnapshotAsync(string streamId, object @event);
-		Task EnqueueDeleteAsync(string streamId);
-	}
-
 	public class Scribe : IScribe
 	{
 		readonly PersistedEventsStorage eventsStorage;
@@ -40,7 +32,7 @@ namespace Rhino.Events
 			: this(new PersistedOptions
 				{
 					AllowRecovery = true,
-					StreamSource = new FileStreamSource(),
+					StreamSource = new FileStreamSource(dir),
 					DirPath = dir
 				})
 		{

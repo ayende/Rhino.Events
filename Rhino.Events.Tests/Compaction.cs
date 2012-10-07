@@ -48,7 +48,7 @@ namespace Rhino.Events.Tests
 
 				 Assert.Equal(1, s.ReadRaw("users/1").Count());
 
-				 Assert.Equal(1, Directory.GetFiles("TestScribe").Length);
+				 Assert.Equal(1, Directory.GetFiles("TestScribe","*.events.*").Length);
 			 }
 		 }
 	}

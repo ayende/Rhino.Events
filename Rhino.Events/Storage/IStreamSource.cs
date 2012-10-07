@@ -4,7 +4,7 @@ namespace Rhino.Events.Storage
 {
 	public interface IStreamSource
 	{
-		Stream OpenReadWrite(string path);
+		Stream OpenReadWrite(string file);
 		
 		Stream OpenRead(string path);
 		
@@ -15,5 +15,8 @@ namespace Rhino.Events.Storage
 		void DeleteIfExists(string path);
 
 		void RenameToLatest(string newFilePath, string path);
+
+		string GetLatestName(string path);
+		bool Exists(string offsetsPath);
 	}
 }

@@ -10,18 +10,26 @@ namespace Rhino.Events.Data
 		public IStreamSource StreamSource { get; set; }
 		public bool AllowRecovery { get; set; }
 
-		public int WeakMaxSize { get; set; }
-		public int HardMaxSize { get; set; }
-		public int CheckOncePer { get; set; }
+		public int CacheWeakMaxSize { get; set; }
+		public int CacheHardMaxSize { get; set; }
+		public int ClearCacheAfterSetCalledTimes { get; set; }
 
-		public TimeSpan MaxTimeToWaitForFlushingToDisk { get; set; }
+		public TimeSpan IdleTime { get; set; }
+		
+		public TimeSpan MaxTimeToWaitForFlush { get; set; }
+
+		public int WritesBetweenOffsetSnapshots { get; set; }
+		public TimeSpan MinTimeForOffsetSnapshots { get; set; }
 
 		public PersistedOptions()
 		{
-			CheckOncePer = 1000;
-			HardMaxSize = 100000;
-			WeakMaxSize = 25000;
-			MaxTimeToWaitForFlushingToDisk = TimeSpan.FromMinutes(3);
+			ClearCacheAfterSetCalledTimes = 1000;
+			CacheHardMaxSize = 100000;
+			CacheWeakMaxSize = 25000;
+			MaxTimeToWaitForFlush = TimeSpan.FromMilliseconds(200);
+			IdleTime = TimeSpan.FromMinutes(3);
+			WritesBetweenOffsetSnapshots = 15000;
+			MinTimeForOffsetSnapshots = TimeSpan.FromMinutes(3);
 		}
 	}
 }

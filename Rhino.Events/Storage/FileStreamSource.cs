@@ -12,6 +12,8 @@ namespace Rhino.Events.Storage
 {
 	public class FileStreamSource : IStreamSource
 	{
+		private readonly string basePath;
+
 		private class FlushingToDiskFileStream: FileStream
 		{
 			public FlushingToDiskFileStream(string path, FileMode mode, FileAccess access, FileShare share) 
@@ -25,22 +27,31 @@ namespace Rhino.Events.Storage
 			}
 		}
 
-		public Stream OpenReadWrite(string path)
+		public FileStreamSource(string basePath)
 		{
-			var dir = Path.GetDirectoryName(path);
-			if (Directory.Exists(dir) == false)
-				Directory.CreateDirectory(dir);
+			this.basePath = basePath;
+			if (Directory.Exists(basePath) == false)
+				Directory.CreateDirectory(basePath);
+		
+		}
+
+		public Stream OpenReadWrite(string file)
+		{
+			var path = Path.Combine(basePath, file);
 			var fileStream = new FlushingToDiskFileStream(LastFileVersion(path), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read | FileShare.Delete);
 			return new BufferedStream( fileStream, 32*1024 );
 		}
 
-		public Stream OpenRead(string path)
+		public Stream OpenRead(string file)
 		{
+			var path = Path.Combine(basePath, file);
 			return new BufferedStream(File.Open(LastFileVersion(path), FileMode.Open, FileAccess.Read, FileShare.Delete | FileShare.ReadWrite));
 		}
 
-		public void DeleteOnClose(string path)
+		public void DeleteOnClose(string file)
 		{
+			var path = Path.Combine(basePath, file);
+		
 			using (new FileStream(LastFileVersion(path), FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096, FileOptions.DeleteOnClose))
 			{
 			}
@@ -51,14 +62,19 @@ namespace Rhino.Events.Storage
 			stream.Flush();
 		}
 
-		public void DeleteIfExists(string path)
+		public void DeleteIfExists(string file)
 		{
+			var path = Path.Combine(basePath, file);
+		
 			if (File.Exists(path))
 				File.Delete(path);
 		}
 
-		public void RenameToLatest(string newFilePath, string path)
+		public void RenameToLatest(string newFile, string file)
 		{
+			var path = Path.Combine(basePath, file);
+			var newFilePath = Path.Combine(basePath, newFile);
+		
 			var fileVersion = LastFileVersion(path);
 			var extension = Path.GetExtension(fileVersion);
 			Debug.Assert(extension != null);
@@ -72,9 +88,23 @@ namespace Rhino.Events.Storage
 			pathCache.TryRemove(path, out _);
 		}
 
-		readonly ConcurrentDictionary<string,string> pathCache = new ConcurrentDictionary<string, string>(); 
+		public string GetLatestName(string file)
+		{
+			var path = Path.Combine(basePath, file);
+		
+			return LastFileVersion(path);
+		}
 
-		public string LastFileVersion(string path)
+		public bool Exists(string file)
+		{
+			var path = Path.Combine(basePath, file);
+			return File.Exists(path);
+
+		}
+
+		readonly ConcurrentDictionary<string,string> pathCache = new ConcurrentDictionary<string, string>();
+
+		private string LastFileVersion(string path)
 		{
 			return pathCache.GetOrAdd(path, s =>
 				{

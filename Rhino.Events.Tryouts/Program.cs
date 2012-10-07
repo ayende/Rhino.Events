@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading;
@@ -14,13 +15,14 @@ namespace Tryouts
 
 		static volatile bool run = true;
 		private static int count = 0;
-		static void Main(string[] args)
+		static void Main()
 		{
+
 			var scribe = new Scribe(new PersistedOptions
 				{
 					DirPath = "ScribedEvents",
-					StreamSource = new FileStreamSource(),
-					MaxTimeToWaitForFlushingToDisk = TimeSpan.FromSeconds(1)
+					StreamSource = new FileStreamSource("ScribedEvents"),
+					MaxTimeToWaitForFlush = TimeSpan.FromMilliseconds(1000)
 				});
 
 			var sp = Stopwatch.StartNew();
