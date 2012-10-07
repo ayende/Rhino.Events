@@ -70,7 +70,8 @@ namespace Rhino.Events.Tests
 			}
 
 			// simulate file corruption
-			using (var file = File.Open(@"TestScribe\data.events", FileMode.Open, FileAccess.ReadWrite))
+			var fileName = Directory.GetFiles(@"TestScribe", "data.events.*").First();
+			using (var file = File.Open(fileName, FileMode.Open, FileAccess.ReadWrite))
 			{
 				file.SetLength(file.Length - 5);
 			}

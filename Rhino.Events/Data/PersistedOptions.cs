@@ -1,3 +1,5 @@
+using System;
+using System.Threading;
 using Rhino.Events.Storage;
 
 namespace Rhino.Events.Data
@@ -12,11 +14,14 @@ namespace Rhino.Events.Data
 		public int HardMaxSize { get; set; }
 		public int CheckOncePer { get; set; }
 
+		public TimeSpan IdleTime { get; set; }
+
 		public PersistedOptions()
 		{
 			CheckOncePer = 100;
 			HardMaxSize = 10000;
 			WeakMaxSize = 2500;
+			IdleTime = TimeSpan.FromMinutes(3);
 		}
 	}
 }

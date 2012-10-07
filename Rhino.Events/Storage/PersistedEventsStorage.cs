@@ -27,9 +27,10 @@ namespace Rhino.Events.Storage
 		private readonly Stream file;
 		private readonly Task writerThread;
 		private readonly ManualResetEventSlim hasItems = new ManualResetEventSlim(false);
-		private readonly ConcurrentQueue<WriteState> writer = new ConcurrentQueue<WriteState>();
+		private readonly ConcurrentQueue<WriteState> itemsToWrite = new ConcurrentQueue<WriteState>();
 		private readonly CancellationTokenSource cts = new CancellationTokenSource();
 		private readonly JsonDataCache<PersistedEvent> cache;
+		private readonly ReaderWriterLockSlim compactionLock = new ReaderWriterLockSlim();
 		private readonly ConcurrentDictionary<string, StreamInformation> idToPos = new ConcurrentDictionary<string, StreamInformation>(StringComparer.InvariantCultureIgnoreCase);
 		private readonly BinaryWriter binaryWriter;
 
@@ -42,14 +43,9 @@ namespace Rhino.Events.Storage
 		private volatile bool disposed;
 		private volatile Exception corruptingException;
 
-		private class WriteState
+		private class WriteState : PersistedEvent
 		{
 			public readonly TaskCompletionSource<object> TaskCompletionSource = new TaskCompletionSource<object>();
-			public string Id;
-			public JObject Data;
-			public EventState State;
-
-			public JObject Metadata;
 		}
 
 		public PersistedEventsStorage(PersistedOptions options)
@@ -145,8 +141,17 @@ namespace Rhino.Events.Storage
 			AssertValidState();
 
 			StreamInformation previous;
-			if (idToPos.TryGetValue(id, out previous) == false)
-				return null;
+
+			compactionLock.EnterReadLock();
+			try
+			{
+				if (idToPos.TryGetValue(id, out previous) == false)
+					return null;
+			}
+			finally
+			{
+				compactionLock.ExitReadLock();
+			}
 
 			return ReadInternal(previous.LastPosition).Select(x => new EventData
 				{
@@ -198,11 +203,11 @@ namespace Rhino.Events.Storage
 			}
 		}
 
-		private void WriteItem(WriteState item, long prevPos, StreamInformation info)
+		private static void WriteItem(PersistedEvent item, BinaryWriter binaryWriter)
 		{
 			binaryWriter.Write(item.Id);
-			binaryWriter.Write(prevPos);
-			binaryWriter.Write(info == null ? 1 : info.StreamLength);
+			binaryWriter.Write(item.Previous);
+			binaryWriter.Write(item.StreamLength);
 			binaryWriter.Write((int)item.State);
 
 			item.Metadata.WriteTo(new BsonWriter(binaryWriter));
@@ -270,7 +275,7 @@ namespace Rhino.Events.Storage
 						continue;
 					}
 				}
-				if (writer.TryDequeue(out item) == false)
+				if (itemsToWrite.TryDequeue(out item) == false)
 				{
 					if (hadWrites)
 					{
@@ -278,7 +283,20 @@ namespace Rhino.Events.Storage
 					}
 					else
 					{
-						hasItems.Wait(cts.Token);
+						if(deleteCount > (eventsCount / 4)) // we have > 25% wasted space
+						{
+							// we waited enough time to be pretty sure we are idle
+							// and can run compaction without too much problems.
+							if(hasItems.Wait(options.IdleTime, cts.Token) == false)
+							{
+								Compact();
+								continue;
+							}
+						}
+						else
+						{
+							hasItems.Wait(cts.Token);
+						}
 						hasItems.Reset();
 					}
 					continue;
@@ -289,16 +307,18 @@ namespace Rhino.Events.Storage
 
 				var prevPos = info == null ? DoesNotExists : info.LastPosition;
 				var currentPos = file.Position;
-				WriteItem(item, prevPos, info);
 
-				cache.Set(currentPos, new PersistedEvent
+				var persistedEvent = new PersistedEvent
 					{
 						Id = item.Id,
-						Data = item.Data,
-						State = item.State,
-						Previous = prevPos,
+						Data = item.Data, 
+						State = item.State, 
+						Previous = prevPos, 
 						Metadata = item.Metadata
-					});
+					};
+
+				WriteItem(persistedEvent, binaryWriter);
+				cache.Set(currentPos, persistedEvent);
 
 				var action = CreateCompletionAction(tasksToNotify, item, currentPos);
 				tasksToNotify.Add(action);
@@ -307,6 +327,73 @@ namespace Rhino.Events.Storage
 			}
 		}
 
+		private void Compact()
+		{
+			var newPos = new Dictionary<string, long>(StringComparer.InvariantCultureIgnoreCase);
+
+			var newFilePath = path + ".compacting";
+			streamSource.DeleteIfExists(newFilePath);
+
+			using(var newFile = streamSource.OpenReadWrite(newFilePath))
+			using(var newWriter = new BinaryWriter(newFile))
+			using(var current = streamSource.OpenRead(path))
+			using(var reader = new BinaryReader(current))
+			{
+				while (true)
+				{
+					PersistedEvent persistedEvent;
+					try
+					{
+						persistedEvent = ReadPersistedEvent(reader);
+					}
+					catch (EndOfStreamException)
+					{
+						break;
+					}
+					StreamInformation value;
+					if(idToPos.TryGetValue(persistedEvent.Id, out value) == false)
+						continue;
+
+					
+					if(value.LastPosition == Deleted || value.LastPosition == DoesNotExists)
+						continue;
+
+					long prev;
+					if(newPos.TryGetValue(persistedEvent.Id, out prev) == false)
+						prev = DoesNotExists;
+
+					persistedEvent.Previous = prev;
+
+					newPos[persistedEvent.Id] = newFile.Position;
+					WriteItem(persistedEvent, newWriter);
+				}
+
+				streamSource.Flush(newFile);
+
+				compactionLock.EnterWriteLock();
+				try
+				{
+					newFile.Close();
+					streamSource.RenameToLatest(newFilePath, path);
+				}
+				finally
+				{
+					compactionLock.ExitWriteLock();
+				}
+
+				streamSource.DeleteOnClose(path);
+			}
+		}
+
+		public long DeleteCount
+		{
+			get { return deleteCount; }
+		}
+
+		public long EventsCount
+		{
+			get { return eventsCount; }
+		}
 
 		private Action<Exception> CreateCompletionAction(List<Action<Exception>> tasksToNotify, WriteState item, long currentPos)
 		{
@@ -399,7 +486,7 @@ namespace Rhino.Events.Storage
 					Id = id
 				};
 
-			writer.Enqueue(item);
+			itemsToWrite.Enqueue(item);
 			hasItems.Set();
 			return item.TaskCompletionSource.Task;
 		}
