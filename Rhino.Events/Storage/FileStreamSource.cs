@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO;
 using System.Linq;
 
@@ -39,42 +40,41 @@ namespace Rhino.Events.Storage
 		public void RenameToLatest(string newFilePath, string path)
 		{
 			var fileVersion = LastFileVersion(path);
-			if(fileVersion == null)
-			{
-				
-			}
 			var numeric = Path.GetExtension(fileVersion).Substring(1);
 			int lastFileId = int.Parse(numeric);
 			var newName = path + "." + (lastFileId + 1).ToString("00000000");
 
-			File.Move(newFilePath, newName);
+			File.Move(LastFileVersion(newFilePath), newName);
+			
+			string _;
+			pathCache.TryRemove(path, out _);
 		}
 
-		string lastFileVersion;
+		readonly ConcurrentDictionary<string,string> pathCache = new ConcurrentDictionary<string, string>(); 
 
 		public string LastFileVersion(string path)
 		{
-			if (lastFileVersion != null)
-				return lastFileVersion;
-			lastFileVersion = 
-				Directory.GetFiles(Path.GetDirectoryName(path), Path.GetFileName(path) + ".*")
-					.OrderByDescending(file =>
-						{
-							var extension = Path.GetExtension(file);
-							if(string.IsNullOrWhiteSpace(extension))
-								return -2;
+			return pathCache.GetOrAdd(path, s =>
+				{
+					var lastFileVersion =
+						Directory.GetFiles(Path.GetDirectoryName(path), Path.GetFileName(path) + ".*")
+							.OrderByDescending(file =>
+								{
+									var extension = Path.GetExtension(file);
+									if (string.IsNullOrWhiteSpace(extension))
+										return -2;
 
-							int result;
-							if(int.TryParse(extension.Substring(1),out result)==false)
-								return -1;
-							return result;
-						})
-					.FirstOrDefault();
+									int result;
+									if (int.TryParse(extension.Substring(1), out result) == false)
+										return -1;
+									return result;
+								})
+							.FirstOrDefault();
 
-			if(lastFileVersion == null)
-				lastFileVersion = path + ".00000001";
-
-			return lastFileVersion;
+					if (lastFileVersion == null)
+						lastFileVersion = path + ".00000001";
+					return lastFileVersion;
+				});
 		}
 	}
 }

@@ -46,6 +46,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="BasicPersistence.cs" />
+    <Compile Include="Compaction.cs" />
     <Compile Include="Events.cs" />
     <Compile Include="EventsTest.cs" />
     <Compile Include="Events\NewUserCreated.cs" />

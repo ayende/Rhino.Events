@@ -16,7 +16,7 @@ namespace Rhino.Events.Storage
 {
 	public class PersistedEventsStorage : IDisposable
 	{
-		private static ILog log = LogManager.GetCurrentClassLogger();
+		private static readonly ILog log = LogManager.GetCurrentClassLogger();
 
 		private readonly PersistedOptions options;
 		private const long DoesNotExists = -1;
@@ -24,7 +24,6 @@ namespace Rhino.Events.Storage
 
 		private readonly IStreamSource streamSource;
 		private readonly string path;
-		private readonly Stream file;
 		private readonly Task writerThread;
 		private readonly ManualResetEventSlim hasItems = new ManualResetEventSlim(false);
 		private readonly ConcurrentQueue<WriteState> itemsToWrite = new ConcurrentQueue<WriteState>();
@@ -32,7 +31,10 @@ namespace Rhino.Events.Storage
 		private readonly JsonDataCache<PersistedEvent> cache;
 		private readonly ReaderWriterLockSlim compactionLock = new ReaderWriterLockSlim();
 		private readonly ConcurrentDictionary<string, StreamInformation> idToPos = new ConcurrentDictionary<string, StreamInformation>(StringComparer.InvariantCultureIgnoreCase);
-		private readonly BinaryWriter binaryWriter;
+		private readonly ConcurrentQueue<Stream> cachedReadStreams = new ConcurrentQueue<Stream>();
+
+		private BinaryWriter binaryWriter;
+		private Stream file;
 
 		private long eventsCount;
 		private long deleteCount;
@@ -141,19 +143,25 @@ namespace Rhino.Events.Storage
 			AssertValidState();
 
 			StreamInformation previous;
+			Stream stream;
 
 			compactionLock.EnterReadLock();
 			try
 			{
 				if (idToPos.TryGetValue(id, out previous) == false)
 					return null;
+
+				if(cachedReadStreams.TryDequeue(out stream) == false)
+				{
+					stream = streamSource.OpenRead(path);
+				}
 			}
 			finally
 			{
 				compactionLock.ExitReadLock();
 			}
 
-			return ReadInternal(previous.LastPosition).Select(x => new EventData
+			return ReadInternal(stream, previous.LastPosition).Select(x => new EventData
 				{
 					Data = x.Data,
 					State = x.State,
@@ -171,35 +179,41 @@ namespace Rhino.Events.Storage
 				throw new ObjectDisposedException("PersistedEventsStorage");
 		}
 
-		private IEnumerable<PersistedEvent> ReadInternal(long previous)
+		private IEnumerable<PersistedEvent> ReadInternal(Stream stream, long previous)
 		{
-			foreach (var p in ReadFromCache(previous))
+			try
 			{
-				previous = p.Previous;
-				yield return p;
-			}
-
-			using (var stream = streamSource.OpenRead(path))
-			using (var reader = new BinaryReader(stream))
-			{
-				while (true)
+				foreach (var p in ReadFromCache(previous))
 				{
-					foreach (var p in ReadFromCache(previous))
-					{
-						previous = p.Previous;
-						yield return p;
-					}
-
-					if (previous == DoesNotExists || previous == Deleted)
-						yield break;
-
-					var itemPos = previous;
-					stream.Position = previous;
-					var persistedEvent = ReadPersistedEvent(reader);
-					previous = persistedEvent.Previous;
-					cache.Set(itemPos, persistedEvent);
-					yield return persistedEvent;
+					previous = p.Previous;
+					yield return p;
 				}
+
+				using (var reader = new BinaryReader(stream, leaveOpen: true, encoding: Encoding.UTF8))
+				{
+					while (true)
+					{
+						foreach (var p in ReadFromCache(previous))
+						{
+							previous = p.Previous;
+							yield return p;
+						}
+
+						if (previous == DoesNotExists || previous == Deleted)
+							yield break;
+
+						var itemPos = previous;
+						stream.Position = previous;
+						var persistedEvent = ReadPersistedEvent(reader);
+						previous = persistedEvent.Previous;
+						cache.Set(itemPos, persistedEvent);
+						yield return persistedEvent;
+					}
+				}
+			}
+			finally
+			{
+				cachedReadStreams.Enqueue(stream);
 			}
 		}
 
@@ -283,11 +297,11 @@ namespace Rhino.Events.Storage
 					}
 					else
 					{
-						if(deleteCount > (eventsCount / 4)) // we have > 25% wasted space
+						if (deleteCount > (eventsCount / 4)) // we have > 25% wasted space
 						{
 							// we waited enough time to be pretty sure we are idle
 							// and can run compaction without too much problems.
-							if(hasItems.Wait(options.IdleTime, cts.Token) == false)
+							if (hasItems.Wait(options.IdleTime, cts.Token) == false)
 							{
 								Compact();
 								continue;
@@ -311,9 +325,9 @@ namespace Rhino.Events.Storage
 				var persistedEvent = new PersistedEvent
 					{
 						Id = item.Id,
-						Data = item.Data, 
-						State = item.State, 
-						Previous = prevPos, 
+						Data = item.Data,
+						State = item.State,
+						Previous = prevPos,
 						Metadata = item.Metadata
 					};
 
@@ -327,17 +341,17 @@ namespace Rhino.Events.Storage
 			}
 		}
 
-		private void Compact()
+		public void Compact()
 		{
-			var newPos = new Dictionary<string, long>(StringComparer.InvariantCultureIgnoreCase);
+			var newPositions = new Dictionary<string, StreamInformation>(StringComparer.InvariantCultureIgnoreCase);
 
 			var newFilePath = path + ".compacting";
 			streamSource.DeleteIfExists(newFilePath);
 
-			using(var newFile = streamSource.OpenReadWrite(newFilePath))
-			using(var newWriter = new BinaryWriter(newFile))
-			using(var current = streamSource.OpenRead(path))
-			using(var reader = new BinaryReader(current))
+			using (var newFile = streamSource.OpenReadWrite(newFilePath))
+			using (var newWriter = new BinaryWriter(newFile))
+			using (var current = streamSource.OpenRead(path))
+			using (var reader = new BinaryReader(current))
 			{
 				while (true)
 				{
@@ -351,20 +365,30 @@ namespace Rhino.Events.Storage
 						break;
 					}
 					StreamInformation value;
-					if(idToPos.TryGetValue(persistedEvent.Id, out value) == false)
+					if (idToPos.TryGetValue(persistedEvent.Id, out value) == false)
 						continue;
 
-					
-					if(value.LastPosition == Deleted || value.LastPosition == DoesNotExists)
+
+					if (value.LastPosition == Deleted || value.LastPosition == DoesNotExists)
 						continue;
 
-					long prev;
-					if(newPos.TryGetValue(persistedEvent.Id, out prev) == false)
-						prev = DoesNotExists;
+					StreamInformation information;
+					if (newPositions.TryGetValue(persistedEvent.Id, out information) == false)
+					{
+						information =new StreamInformation
+							{
+								LastPosition = DoesNotExists,
+								StreamLength = 0
+							};
+					}
 
-					persistedEvent.Previous = prev;
+					persistedEvent.Previous = information.LastPosition;
 
-					newPos[persistedEvent.Id] = newFile.Position;
+					newPositions[persistedEvent.Id] = new StreamInformation
+						{
+							LastPosition = newFile.Position,
+							StreamLength = persistedEvent.StreamLength
+						};
 					WriteItem(persistedEvent, newWriter);
 				}
 
@@ -374,14 +398,33 @@ namespace Rhino.Events.Storage
 				try
 				{
 					newFile.Close();
+					streamSource.DeleteOnClose(path);
+
+					Stream result;
+					while (cachedReadStreams.TryDequeue(out result))
+					{
+						result.Dispose();
+					}
+
+					binaryWriter.Dispose();
+					file.Dispose();
+
 					streamSource.RenameToLatest(newFilePath, path);
+
+					file = streamSource.OpenReadWrite(path);
+					binaryWriter = new BinaryWriter(file, Encoding.UTF8, leaveOpen: true);
+
+					idToPos.Clear();
+					foreach (var val in newPositions)
+					{
+						idToPos[val.Key] = val.Value;
+					}
 				}
 				finally
 				{
 					compactionLock.ExitWriteLock();
 				}
 
-				streamSource.DeleteOnClose(path);
 			}
 		}
 
@@ -500,6 +543,11 @@ namespace Rhino.Events.Storage
 			e.Execute(file.Dispose);
 			e.Execute(cache.Dispose);
 			e.Execute(hasItems.Dispose);
+
+			foreach (var cachedReadStream in cachedReadStreams)
+			{
+				e.Execute(cachedReadStream.Dispose);
+			}
 
 			e.ThrowIfNeeded();
 
