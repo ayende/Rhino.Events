@@ -18,9 +18,9 @@ namespace Rhino.Events.Data
 
 		public PersistedOptions()
 		{
-			CheckOncePer = 100;
-			HardMaxSize = 10000;
-			WeakMaxSize = 2500;
+			CheckOncePer = 1000;
+			HardMaxSize = 100000;
+			WeakMaxSize = 25000;
 			MaxTimeToWaitForFlushingToDisk = TimeSpan.FromMinutes(3);
 		}
 	}
