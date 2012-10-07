@@ -301,7 +301,7 @@ namespace Rhino.Events.Storage
 						{
 							// we waited enough time to be pretty sure we are idle
 							// and can run compaction without too much problems.
-							if (hasItems.Wait(options.IdleTime, cts.Token) == false)
+							if (hasItems.Wait(options.MaxTimeToWaitForFlushingToDisk, cts.Token) == false)
 							{
 								Compact();
 								continue;
@@ -332,7 +332,6 @@ namespace Rhino.Events.Storage
 					};
 
 				WriteItem(persistedEvent, binaryWriter);
-				cache.Set(currentPos, persistedEvent);
 
 				var action = CreateCompletionAction(tasksToNotify, item, currentPos);
 				tasksToNotify.Add(action);
