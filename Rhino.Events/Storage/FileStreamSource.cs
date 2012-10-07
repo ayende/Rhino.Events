@@ -51,8 +51,11 @@ namespace Rhino.Events.Storage
 		public void DeleteOnClose(string file)
 		{
 			var path = Path.Combine(basePath, file);
-		
-			using (new FileStream(LastFileVersion(path), FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096, FileOptions.DeleteOnClose))
+
+			var lastFileVersion = LastFileVersion(path);
+			if (File.Exists(lastFileVersion) == false)
+				return;
+			using (new FileStream(lastFileVersion, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096, FileOptions.DeleteOnClose))
 			{
 			}
 		}
@@ -98,7 +101,7 @@ namespace Rhino.Events.Storage
 		public bool Exists(string file)
 		{
 			var path = Path.Combine(basePath, file);
-			return File.Exists(path);
+			return File.Exists(LastFileVersion(path));
 
 		}
 

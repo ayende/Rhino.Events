@@ -17,6 +17,7 @@ namespace Rhino.Events.Storage
 		void RenameToLatest(string newFilePath, string path);
 
 		string GetLatestName(string path);
+
 		bool Exists(string offsetsPath);
 	}
 }

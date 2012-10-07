@@ -22,7 +22,7 @@ namespace Tryouts
 				{
 					DirPath = "ScribedEvents",
 					StreamSource = new FileStreamSource("ScribedEvents"),
-					MaxTimeToWaitForFlush = TimeSpan.FromMilliseconds(1000)
+					MaxTimeToWaitForFlush = TimeSpan.FromMilliseconds(200)
 				});
 
 			var sp = Stopwatch.StartNew();

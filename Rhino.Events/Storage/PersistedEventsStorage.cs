@@ -82,7 +82,7 @@ namespace Rhino.Events.Storage
 
 		private void ReadAllFromDisk()
 		{
-			file.Position = ReadOffsets(streamSource.GetLatestName(dataPath));
+			file.Position = ReadOffsets(Path.GetFileName(streamSource.GetLatestName(dataPath)));
 			while (true)
 			{
 				using (var reader = new BinaryReader(file, Encoding.UTF8, leaveOpen: true))
@@ -504,12 +504,6 @@ namespace Rhino.Events.Storage
 				{
 					taskCompletionSource(null);
 				}
-				if(closing || 
-					(eventsCount - lastWriteSnapshotCount) > options.WritesBetweenOffsetSnapshots ||
-					(eventsCount > lastWriteSnapshotCount) && (DateTime.UtcNow - lastWriteSnapshotTime) > options.MinTimeForOffsetSnapshots)
-				{
-					FlushOffsets();
-				}
 			}
 			catch (Exception e)
 			{
@@ -521,10 +515,16 @@ namespace Rhino.Events.Storage
 			}
 			finally
 			{
-
 				tasksToNotify.Clear();
 				lastWrite = DateTime.UtcNow;
 				hadWrites = false;
+			}
+
+			if (closing ||
+				(eventsCount - lastWriteSnapshotCount) > options.WritesBetweenOffsetSnapshots ||
+				(eventsCount > lastWriteSnapshotCount) && (DateTime.UtcNow - lastWriteSnapshotTime) > options.MinTimeForOffsetSnapshots)
+			{
+				FlushOffsets();
 			}
 		}
 
@@ -588,7 +588,7 @@ namespace Rhino.Events.Storage
 				}
 				writer.Flush();
 			}
-			streamSource.DeleteIfExists(offsetsPath);
+			streamSource.DeleteOnClose(offsetsPath);
 			streamSource.RenameToLatest(offsetsPath + ".new", offsetsPath);
 		}
 
