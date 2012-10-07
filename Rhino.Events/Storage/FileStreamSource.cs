@@ -36,7 +36,7 @@ namespace Rhino.Events.Storage
 
 		public Stream OpenRead(string path)
 		{
-			return File.Open(LastFileVersion(path), FileMode.Open, FileAccess.Read, FileShare.Delete | FileShare.ReadWrite);
+			return new BufferedStream(File.Open(LastFileVersion(path), FileMode.Open, FileAccess.Read, FileShare.Delete | FileShare.ReadWrite));
 		}
 
 		public void DeleteOnClose(string path)
