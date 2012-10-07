@@ -1,17 +1,37 @@
+using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Reflection.Emit;
+using System.Security.AccessControl;
+using Microsoft.Win32.SafeHandles;
 
 namespace Rhino.Events.Storage
 {
 	public class FileStreamSource : IStreamSource
 	{
+		private class FlushingToDiskFileStream: FileStream
+		{
+			public FlushingToDiskFileStream(string path, FileMode mode, FileAccess access, FileShare share) 
+				: base(path, mode, access, share)
+			{
+			}
+
+			public override void Flush()
+			{
+				Flush(flushToDisk: true);
+			}
+		}
+
 		public Stream OpenReadWrite(string path)
 		{
 			var dir = Path.GetDirectoryName(path);
 			if (Directory.Exists(dir) == false)
 				Directory.CreateDirectory(dir);
-			return new FileStream(LastFileVersion(path), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read | FileShare.Delete);
+			var fileStream = new FlushingToDiskFileStream(LastFileVersion(path), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read | FileShare.Delete);
+			return new BufferedStream( fileStream, 32*1024 );
 		}
 
 		public Stream OpenRead(string path)
@@ -28,7 +48,7 @@ namespace Rhino.Events.Storage
 
 		public void Flush(Stream stream)
 		{
-			((FileStream)stream).Flush(true);
+			stream.Flush();
 		}
 
 		public void DeleteIfExists(string path)
@@ -40,7 +60,9 @@ namespace Rhino.Events.Storage
 		public void RenameToLatest(string newFilePath, string path)
 		{
 			var fileVersion = LastFileVersion(path);
-			var numeric = Path.GetExtension(fileVersion).Substring(1);
+			var extension = Path.GetExtension(fileVersion);
+			Debug.Assert(extension != null);
+			var numeric = extension.Substring(1);
 			int lastFileId = int.Parse(numeric);
 			var newName = path + "." + (lastFileId + 1).ToString("00000000");
 

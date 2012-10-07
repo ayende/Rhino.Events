@@ -5,7 +5,6 @@ namespace Rhino.Events.Impl
 {
 	public class ExceptionAggregator
 	{
-		private readonly string errorMsg;
 		readonly ConcurrentQueue<Exception> list = new ConcurrentQueue<Exception>();
 
 		public void Execute(Action action)
@@ -24,6 +23,7 @@ namespace Rhino.Events.Impl
 		{
 			if (list.Count == 0)
 				return;
+
 
 			var aggregateException = new AggregateException(list);
 			throw aggregateException;
